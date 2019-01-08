@@ -224,3 +224,9 @@ class CDVAE(object):
 
     def mcc_decode(self, z, y):
         return self.mcc_dec(z, y)
+
+    def encode(self, x):
+        return self.mcc_encode(x)
+
+    def decode(self, z, y):
+        return self.mcc_decode(z, y)

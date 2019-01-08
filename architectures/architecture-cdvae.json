@@ -4,6 +4,7 @@
     "trainer": "VAETrainer",
     "trainer_module": "trainer.vae",
     "stat_dir": "/mnt/md1/datasets/vcc2018/world/etc-new",
+    "spklist": "/mnt/md1/datasets/vcc2018/world/etc/speakers.tsv",
 
     "z_dim": 4,
 	"y_dim": 12,
@@ -49,6 +50,11 @@
         "summary_freq": 1000, 
         "log_freq": 1000
 	},
+    "conversion": {
+        "input": "mcc",
+        "output": "mcc",
+        "test_file_pattern": "/mnt/md1/datasets/vcc2018/world/bin-dynamic/no_VAD/ev/{}/*.bin"
+    },
     "feat_param":{
         "fs": 22050,
         "shiftms": 5,
@@ -56,7 +62,12 @@
         "mcep_alpha": 0.455,
         "sp_dim": 513,
         "mcc_dim": 34,
-        "feat_dim": 2710
+        "feat_dim": 2710,
+        "dim":{
+            "sp": 513,
+            "mcc": 34,
+            "feat": 2710
+        }
     },
     "normalizer_files":{
         "sp": {
