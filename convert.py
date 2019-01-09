@@ -80,15 +80,21 @@ def main():
     # Load statistics, normalize and NCHW
     normalizers = {}
     for k in arch['normalizer_files']:
-        normalizer = MinMaxScaler(
-            xmax=np.fromfile(os.path.join(arch['stat_dir'], arch['normalizer_files'][k]['max'])),
-            xmin=np.fromfile(os.path.join(arch['stat_dir'], arch['normalizer_files'][k]['min'])),
-        )
-        normalizers[k] = normalizer
+        if (arch['normalizer_files'][k]['max'] is not None
+            or arch['normalizer_files'][k]['max'] is not None):
+            normalizer = MinMaxScaler(
+                xmax=np.fromfile(os.path.join(arch['stat_dir'], arch['normalizer_files'][k]['max'])),
+                xmin=np.fromfile(os.path.join(arch['stat_dir'], arch['normalizer_files'][k]['min'])),
+            )
+            normalizers[k] = normalizer
 
     # Define placeholders
     x_pl = tf.placeholder(tf.float32, [None, input_feat_dim])
-    x = tf.expand_dims(tf.expand_dims(normalizers[input_feat].forward_process(x_pl), 1), -1)
+    if input_feat in normalizers:
+        x = normalizers[input_feat].forward_process(x_pl)
+    else:
+        x = x_pl
+    x = tf.expand_dims(tf.expand_dims(x, 1), -1)
     yh_pl = tf.placeholder(dtype=tf.int64, shape=[1,])
     yh = yh_pl * tf.ones(shape=[tf.shape(x)[0],], dtype=tf.int64)
     
@@ -97,7 +103,8 @@ def main():
     z = model.encode(x)
     xh = model.decode(z, yh)
     xh = tf.squeeze(xh)
-    xh = normalizers[output_feat].backward_process(xh)
+    if output_feat in normalizers:
+        xh = normalizers[output_feat].backward_process(xh)
     
     # make directories for output
     tf.gfile.MakeDirs(os.path.join(output_dir, 'latent'))

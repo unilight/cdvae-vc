@@ -67,13 +67,18 @@ def main():
     # Load statistics, normalize and NCHW
     normalizers = {}
     for k in arch['normalizer_files']:
-        normalizer = MinMaxScaler(
-            xmax=np.fromfile(os.path.join(arch['stat_dir'], arch['normalizer_files'][k]['max'])),
-            xmin=np.fromfile(os.path.join(arch['stat_dir'], arch['normalizer_files'][k]['min'])),
-        )
-        normalizers[k] = normalizer
+        if (arch['normalizer_files'][k]['max'] is not None
+            and arch['normalizer_files'][k]['max'] is not None):
+            normalizer = MinMaxScaler(
+                xmax=np.fromfile(os.path.join(arch['stat_dir'], arch['normalizer_files'][k]['max'])),
+                xmin=np.fromfile(os.path.join(arch['stat_dir'], arch['normalizer_files'][k]['min'])),
+            )
+            normalizers[k] = normalizer
+            for data in [train_data, valid_data]:
+                data[k] = normalizer.forward_process(data[k])
+
         for data in [train_data, valid_data]:
-            data[k] = tf.expand_dims(tf.expand_dims(normalizer.forward_process(data[k]), 1), -1)
+            data[k] = tf.expand_dims(tf.expand_dims(data[k], 1), -1)
     
     # Load model and trainer
     model = MODEL(arch)
