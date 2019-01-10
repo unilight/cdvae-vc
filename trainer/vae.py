@@ -7,7 +7,7 @@ from trainer.base import Trainer
 
 class VAETrainer(Trainer):
     '''
-    Trainer for training VAE style models (ex. VAE, CDVAE...)
+    Trainer for training VAE 
     '''
 
     def _optimize(self):
@@ -35,9 +35,7 @@ class VAETrainer(Trainer):
     def print_log(self, result):
         msg = 'Iter {:05d}: '.format(result['step'])
         msg += 'recon = {:.4} '.format(result['recon'])
-        msg += 'cross = {:.4} '.format(result['cross'])
         msg += 'KL = {:.4} '.format(result['D_KL'])
-        msg += 'latent = {:.5} '.format(result['latent'])
         print(msg)
         logging.info(msg)
 
@@ -54,13 +52,11 @@ class VAETrainer(Trainer):
         info_fetches = {
             "D_KL": self.loss['D_KL'],
             "recon": self.loss['recon'],
-            "cross": self.loss['cross'],
-            "latent": self.loss['latent'],
             "opt": self.opt['opt'],
             "step": self.opt['global_step'],
         }
         valid_fetches = {
-            "recon_mcc": self.valid['recon_mcc'],
+            "recon": self.valid['recon_sp'],
             "step": self.opt['global_step'],
         }
 
@@ -103,7 +99,7 @@ class VAETrainer(Trainer):
                     valid_loss_all = []
                     for _ in range(self.valid['num_files']):
                         results = sess.run(valid_fetches)
-                        valid_loss_all.append(results['recon_mcc'])
+                        valid_loss_all.append(results['recon'])
                     
                     valid_loss_avg = np.mean(np.array(valid_loss_all))
                     msg = 'Validation in Iter {:05d}: '.format(results['step'])

@@ -34,9 +34,8 @@ def read_and_synthesize(file_list, arch, MCD, ):
         # Handle if not mcc
         if output_feat == 'sp':
             cvt = np.power(10., cvt)
-            en_cvt = src_data['en_sp'] * cvt
-            mcc_cvt = pysptk.sp2mc(en_cvt, arch['feat_param']['mcc_dim'], arch['feat_param']['mcep_alpha'])
-            raise ValueError
+            en_cvt = np.expand_dims(src_data['en_sp'], 1) * cvt
+            mcc_cvt = pysptk.sp2mc(en_cvt, arch['feat_param']['mcc_dim'], arch['feat_param']['mcep_alpha'])[:, 1:]
         elif output_feat == 'mcc':
             mcc_cvt = cvt
         else:
@@ -99,8 +98,10 @@ def main():
     with open(arch) as fp:
         arch = json.load(fp)
     
+    output_feat = arch['conversion']['output']
+    
     # Get and divide list
-    bin_list = sorted(tf.gfile.Glob(os.path.join(args.logdir, 'converted-mcc', '*.bin')))
+    bin_list = sorted(tf.gfile.Glob(os.path.join(args.logdir, f'converted-{output_feat}', '*.bin')))
     src_feat_list = sorted(tf.gfile.Glob(arch['conversion']['test_file_pattern'].format(src)))
     trg_feat_list = sorted(tf.gfile.Glob(arch['conversion']['test_file_pattern'].format(trg)))
     assert(len(bin_list) == len(src_feat_list))

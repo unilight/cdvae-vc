@@ -35,7 +35,7 @@ def world_synthesis(wav_name, feat_param, f0, ap, spectral, spectral_type):
                                     alpha=feat_param['mcep_alpha'])
     elif spectral_type == 'sp':
         wav = synthesizer.synthesis_spc(f0,
-                                    sp,
+                                    spectral,
                                     ap)
     else:
         logging.info("Currently support 'mcep' or 'spc' only.")

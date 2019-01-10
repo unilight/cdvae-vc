@@ -53,9 +53,9 @@ def read_and_synthesize(file_list, arch, stats, ):
             en_cvt_gv = np.c_[src_data['en_mcc'], cvt_gv]
         elif output_feat == 'sp':
             cvt = np.power(10., cvt)
-            en_cvt = src_data['en_sp'] * cvt
+            en_cvt = np.expand_dims(src_data['en_sp'], 1) * cvt
             cvt_gv = np.power(10., cvt_gv)
-            en_cvt_gv = src_data['en_sp'] * cvt_gv
+            en_cvt_gv = np.expand_dims(src_data['en_sp'], 1) * cvt_gv
 
         # synthesis
         world_synthesis(wav_name, arch['feat_param'],
@@ -109,11 +109,12 @@ def main():
         arch = json.load(fp)
     
     input_feat = arch['conversion']['input']
+    output_feat = arch['conversion']['output']
     
     # Load statistics
     mu_s, std_s = np.fromfile(os.path.join(arch['stat_dir'], '{}.npf'.format(src)), np.float32)
     mu_t, std_t = np.fromfile(os.path.join(arch['stat_dir'], '{}.npf'.format(trg)), np.float32)
-    gv_t = loadmat(os.path.join(arch['stat_dir'], f'gv_{input_feat}', '{}.mat'.format(trg)))[f'gv_{input_feat}'].flatten()
+    gv_t = loadmat(os.path.join(arch['stat_dir'], f'gv_{input_feat}', '{}.mat'.format(trg)))[f'gv_{output_feat}'].flatten()
     stats = {
         'mu_s' : mu_s, 'std_s' : std_s,
         'mu_t' : mu_t, 'std_t' : std_t,
@@ -124,7 +125,7 @@ def main():
     tf.gfile.MakeDirs(os.path.join(args.logdir, 'converted-wav'))
 
     # Get and divide list
-    bin_list = sorted(tf.gfile.Glob(os.path.join(args.logdir, 'converted-mcc', '*.bin')))
+    bin_list = sorted(tf.gfile.Glob(os.path.join(args.logdir, f'converted-{output_feat}', '*.bin')))
     feat_list = sorted(tf.gfile.Glob(arch['conversion']['test_file_pattern'].format(src)))
     assert(len(bin_list) == len(feat_list))
     file_list = list(zip(bin_list, feat_list))
