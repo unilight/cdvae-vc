@@ -1,8 +1,8 @@
 {
     "model": "CDVAE",
     "model_module": "model.cdvae",
-    "trainer": "VAETrainer",
-    "trainer_module": "trainer.vae",
+    "trainer": "CDVAETrainer",
+    "trainer_module": "trainer.cdvae",
     "stat_dir": "/mnt/md1/datasets/vcc2018/world/etc-new",
     "spklist": "/mnt/md1/datasets/vcc2018/world/etc/speakers.tsv",
 

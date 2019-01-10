@@ -1,8 +1,7 @@
 # import numpy as np
 from math import pi
 import tensorflow as tf
-# from tensorflow.contrib import slim
-from tensorflow.python.ops.init_ops import VarianceScaling
+from tensorflow.contrib import slim
 
 EPSILON = tf.constant(1e-6, dtype=tf.float32)
 PI = tf.constant(pi, dtype=tf.float32)
@@ -65,85 +64,6 @@ def conv2d_nchw_layernorm(x, o, k, s, activation, name):
         x = Layernorm(x, [1, 2, 3], 'layernorm')
         return activation(x)
 
-              
-def selu(x):
-    with tf.name_scope('selu'):
-        alpha = 1.6732632423543772848170429916717
-        scale = 1.0507009873554804934193349852946
-        return scale*tf.where(x>=0.0, x, alpha*tf.nn.elu(x))
-    
-def selu_normal(seed=None):
-    return VarianceScaling(
-        scale=1., mode='fan_in', distribution='normal', seed=seed)
-
-def mu_law_encode_nonlinear(audio, quantization_channels=256):
-    '''
-    Compress the waveform amplitudes using mu-law non-linearity. 
-    NOTE: This mu-law functions as a non-linear function as opposed to 
-          quantization.
-    '''
-    with tf.name_scope('encode'):
-        mu = tf.to_float(quantization_channels - 1)
-        # Perform mu-law companding transformation (ITU-T, 1988).
-        # Minimum operation is here to deal with rare large amplitudes caused
-        # by resampling.
-        safe_audio_abs = tf.minimum(tf.abs(audio), 1.0)
-        magnitude = tf.log1p(mu * safe_audio_abs) / tf.log1p(mu)
-        signal = tf.multiply(tf.sign(audio), magnitude, name='mulaw')
-        # Quantize signal to the specified number of levels.
-        # return tf.to_int32((signal + 1) / 2 * mu + 0.5)
-        return signal
-
-
-def mu_law_decode_nonlinear(output, quantization_channels=256):
-    '''
-    Uncompress the waveform amplitudes using mu-law non-linearity. 
-    NOTE: This mu-law functions as a non-linear function.
-    '''
-    with tf.name_scope('decode'):
-        mu = quantization_channels - 1
-        # Map values back to [-1, 1].
-        # signal = 2 * (tf.to_float(output) / mu) - 1
-        signal = output
-        # Perform inverse of mu-law transformation.
-        magnitude = (1 / mu) * ((1 + mu)**abs(signal) - 1)
-        return tf.sign(signal) * magnitude
-
-
-def GumbelSampleLayer(y_mu):
-    ''' Create Gumbel(0, 1) variable from Uniform[0, 1] '''
-    u = tf.random_uniform(
-        minval=0.0,
-        maxval=1.0,
-        shape=tf.shape(y_mu))
-    g = - tf.log(- tf.log(u))
-    return y_mu + g
-
-
-def GumbelSoftmaxLogDensity(y, p, tau):
-    # EPS = tf.constant(1e-10)
-    k = tf.shape(y)[-1]
-    k = tf.cast(k, tf.float32)
-    # y = y + EPS
-    # y = tf.divide(y, tf.reduce_sum(y, -1, keep_dims=True))
-    y = normalize_to_unit_sum(y)
-    sum_p_over_y = tf.reduce_sum(tf.divide(p, tf.pow(y, tau)), -1)
-    logp = tf.lgamma(k)
-    logp = logp + (k - 1) * tf.log(tau)
-    logp = logp - k * tf.log(sum_p_over_y)
-    logp = logp + sum_p_over_y
-    return logp
-
-
-def normalize_to_unit_sum(x, EPS=1e-10):
-    ''' Along the last dim '''
-    EPS = tf.constant(EPS, dtype=tf.float32)
-    x = x + EPS
-    x_sum = tf.reduce_sum(x, -1, keep_dims=True)
-    x = tf.divide(x, x_sum)
-    return x
-
-
 def lrelu(x, leak=0.02, name="lrelu"):
     ''' Leaky ReLU '''
     return tf.maximum(x, leak*x, name=name)
@@ -182,28 +102,20 @@ def GaussianKLD(mu1, lv1, mu2, lv2):
             (lv2 - lv1) + tf.div(v1 + mu_diff_sq, v2 + EPSILON) - 1.)
         return tf.reduce_sum(dimwise_kld, -1)
 
-# Verification by CMU's implementation
-# http://www.cs.cmu.edu/~chanwook/MySoftware/rm1_Spk-by-Spk_MLLR/rm1_PNCC_MLLR_1/rm1/python/sphinx/divergence.py
-# def gau_kl(pm, pv, qm, qv):
-#     """
-#     Kullback-Liebler divergence from Gaussian pm,pv to Gaussian qm,qv.
-#     Also computes KL divergence from a single Gaussian pm,pv to a set
-#     of Gaussians qm,qv.
-#     Diagonal covariances are assumed.  Divergence is expressed in nats.
-#     """
-#     if (len(qm.shape) == 2):
-#         axis = 1
-#     else:
-#         axis = 0
-#     # Determinants of diagonal covariances pv, qv
-#     dpv = pv.prod()
-#     dqv = qv.prod(axis)
-#     # Inverse of diagonal covariance qv
-#     iqv = 1./qv
-#     # Difference between means pm, qm
-#     diff = qm - pm
-#     return (0.5 *
-#             (np.log(dqv / dpv)            # log |\Sigma_q| / |\Sigma_p|
-#              + (iqv * pv).sum(axis)          # + tr(\Sigma_q^{-1} * \Sigma_p)
-#              + (diff * iqv * diff).sum(axis) # + (\mu_q-\mu_p)^T\Sigma_q^{-1}(\mu_q-\mu_p)
-#              - len(pm)))                     # - N
+def kl_loss(z_mu, z_lv):
+    return tf.reduce_mean(
+            GaussianKLD(
+                slim.flatten(z_mu),
+                slim.flatten(z_lv),
+                slim.flatten(tf.zeros_like(z_mu)),
+                slim.flatten(tf.zeros_like(z_lv)),
+            )
+        )
+
+def log_loss(x, xh):
+    return tf.reduce_mean(
+            GaussianLogDensity(
+                slim.flatten(x),
+                slim.flatten(xh),
+                tf.zeros_like(slim.flatten(xh))),
+        )
