@@ -4,7 +4,7 @@ import os
 import numpy as np
 import tensorflow as tf
 from trainer.base import Trainer
-from util.wrapper import save, load
+from util.wrapper import load
 
 class VAEUGANTrainer(Trainer):
     '''
@@ -69,13 +69,6 @@ class VAEUGANTrainer(Trainer):
         print(msg)
         logging.info(msg)
 
-    def get_session(self, sess):
-        session = sess
-        while type(session).__name__ != 'Session':
-            #pylint: disable=W0212
-            session = session._sess
-        return session
-
     def train(self):
         vae_saver = tf.train.Saver()
         run_metadata = tf.RunMetadata()
@@ -133,7 +126,7 @@ class VAEUGANTrainer(Trainer):
 
             # load pretrained model
             if self.args.restore_path:
-                load(saver, self.get_session(sess), self.args.restore_path)
+                load(saver, sess, self.args.restore_path)
             
             # Iterate through training steps
             while not sess.should_stop():
@@ -165,9 +158,6 @@ class VAEUGANTrainer(Trainer):
 
                     else:
                         _ = sess.run(vae_fetches, feed_dict=feed_dict)
-
-                    if (step+1) == self.arch['training']['vae_iter']:
-                        save(vae_saver, self.get_session(sess), os.path.join(self.dirs, 'VAE'), step+1)
 
                 else:
                     feed_dict = {
