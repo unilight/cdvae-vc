@@ -1,7 +1,9 @@
 import tensorflow as tf
 from tensorflow.contrib import slim
 from util.layers import (GaussianKLD, GaussianLogDensity, GaussianSampleLayer,
-                         Layernorm, conv2d_nchw_layernorm, lrelu)
+                         Layernorm, conv2d_nchw_layernorm, lrelu,
+                         kl_loss, log_loss)
+import numpy as np
 
 class CDVAE(object):
     def __init__(self, arch):
@@ -101,25 +103,6 @@ class CDVAE(object):
                     x = lrelu(x)
         return x
 
-    def kl_loss(self, z_mu, z_lv):
-        return tf.reduce_mean(
-                GaussianKLD(
-                    slim.flatten(z_mu),
-                    slim.flatten(z_lv),
-                    slim.flatten(tf.zeros_like(z_mu)),
-                    slim.flatten(tf.zeros_like(z_lv)),
-                )
-            )
-
-    def log_loss(self, x, xh):
-        return tf.reduce_mean(
-                GaussianLogDensity(
-                    slim.flatten(x),
-                    slim.flatten(xh),
-                    tf.zeros_like(slim.flatten(xh))),
-            )
-
-
     def loss(self, data):
 
         x_sp = data['sp']
@@ -132,9 +115,9 @@ class CDVAE(object):
         x_sp_sp = self.sp_dec(z_sp, y)
         x_sp_mcc = self.mcc_dec(z_sp, y)
 
-        kl_loss_sp = self.kl_loss(sp_z_mu, sp_z_lv)
-        recon_loss_sp = self.log_loss(x_sp, x_sp_sp)
-        cross_loss_sp2mcc = self.log_loss(x_mcc, x_sp_mcc)
+        kl_loss_sp = kl_loss(sp_z_mu, sp_z_lv)
+        recon_loss_sp = log_loss(x_sp, x_sp_sp)
+        cross_loss_sp2mcc = log_loss(x_mcc, x_sp_mcc)
        
         # Use mcc as source
         mcc_z_mu, mcc_z_lv = self.mcc_enc(x_mcc)
@@ -142,9 +125,9 @@ class CDVAE(object):
         x_mcc_sp = self.sp_dec(z_mcc, y)
         x_mcc_mcc = self.mcc_dec(z_mcc, y)
 
-        kl_loss_mcc = self.kl_loss(mcc_z_mu, mcc_z_lv)
-        recon_loss_mcc = self.log_loss(x_mcc, x_mcc_mcc)
-        cross_loss_mcc2sp = self.log_loss(x_sp, x_mcc_sp)
+        kl_loss_mcc = kl_loss(mcc_z_mu, mcc_z_lv)
+        recon_loss_mcc = log_loss(x_mcc, x_mcc_mcc)
+        cross_loss_mcc2sp = log_loss(x_sp, x_mcc_sp)
         
         # latent loss
         latent_loss = tf.reduce_mean(tf.abs(sp_z_mu - mcc_z_mu))
@@ -188,14 +171,14 @@ class CDVAE(object):
         x_sp_sp = self.sp_dec(z_sp, y)
         x_sp_mcc = self.mcc_dec(z_sp, y)
 
-        recon_loss_sp = self.log_loss(x_sp, x_sp_sp)
+        recon_loss_sp = log_loss(x_sp, x_sp_sp)
        
         # Use mcc as source
         z_mcc, _ = self.mcc_enc(x_mcc)
         x_mcc_sp = self.sp_dec(z_mcc, y)
         x_mcc_mcc = self.mcc_dec(z_mcc, y)
 
-        recon_loss_mcc = self.log_loss(x_mcc, x_mcc_mcc)
+        recon_loss_mcc = log_loss(x_mcc, x_mcc_mcc)
         
         results = dict()
         results['recon_sp'] = recon_loss_sp 
@@ -210,6 +193,47 @@ class CDVAE(object):
         results['num_files'] = data['num_files']
         
         return results
+
+    def get_train_log(self, result):
+        msg = 'Iter {:05d}: '.format(result['step'])
+        msg += 'recon = {:.4} '.format(result['recon'])
+        msg += 'cross = {:.4} '.format(result['cross'])
+        msg += 'KL = {:.4} '.format(result['D_KL'])
+        msg += 'latent = {:.5} '.format(result['latent'])
+        return msg
+    
+    def get_valid_log(self, step, result_all):
+        valid_loss_all = [loss['recon'] for loss in result_all]
+        valid_loss_avg = np.mean(np.array(valid_loss_all))
+        msg = 'Validation in Iter {:05d}: '.format(step)
+        msg += 'recon = {:.4} '.format(valid_loss_avg)
+        return msg
+
+    def fetches(self, loss, valid, opt): 
+        """ define fetches
+            update_fetches: get logging infos
+            info_fetches: optimization only
+            valid_fetches: for validation
+        """
+        update_fetches = opt['opt']
+        info_fetches = {
+            "D_KL": loss['D_KL'],
+            "recon": loss['recon'],
+            "cross": loss['cross'],
+            "latent": loss['latent'],
+            "opt": opt['opt'],
+            "step": opt['global_step'],
+        }
+        valid_fetches = {
+            "recon": valid['recon_mcc'],
+            "step": opt['global_step'],
+        }
+
+        return {
+            'update': update_fetches,
+            'info': info_fetches,
+            'valid': valid_fetches,
+        }
 
     def sp_encode(self, x):
         z_mu, _ = self.sp_enc(x)

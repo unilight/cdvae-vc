@@ -3,6 +3,7 @@ from tensorflow.contrib import slim
 from util.layers import (GaussianKLD, GaussianLogDensity, GaussianSampleLayer,
                          Layernorm, conv2d_nchw_layernorm, lrelu,
                          kl_loss, log_loss)
+import numpy as np
 
 class VAE(object):
     def __init__(self, arch):
@@ -133,6 +134,43 @@ class VAE(object):
         results['num_files'] = data['num_files']
         
         return results
+        
+    def get_train_log(self, result):
+        msg = 'Iter {:05d}: '.format(result['step'])
+        msg += 'recon = {:.4} '.format(result['recon'])
+        msg += 'KL = {:.4} '.format(result['D_KL'])
+        return msg
+    
+    def get_valid_log(self, step, result_all):
+        valid_loss_all = [loss['recon'] for loss in result_all]
+        valid_loss_avg = np.mean(np.array(valid_loss_all))
+        msg = 'Validation in Iter {:05d}: '.format(step)
+        msg += 'recon = {:.4} '.format(valid_loss_avg)
+        return msg
+
+    def fetches(self, loss, valid, opt): 
+        """ define fetches
+            update_fetches: get logging infos
+            info_fetches: optimization only
+            valid_fetches: for validation
+        """
+        update_fetches = opt['opt']
+        info_fetches = {
+            "D_KL": loss['D_KL'],
+            "recon": loss['recon'],
+            "opt": opt['opt'],
+            "step": opt['global_step'],
+        }
+        valid_fetches = {
+            "recon": valid['recon_sp'],
+            "step": opt['global_step'],
+        }
+
+        return {
+            'update': update_fetches,
+            'info': info_fetches,
+            'valid': valid_fetches,
+        }
 
     def sp_encode(self, x):
         z_mu, _ = self.sp_enc(x)

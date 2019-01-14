@@ -22,13 +22,28 @@ def main():
     parser.add_argument(
         "--architecture", default='architectures/architecture-cdvae.json', type=str,
         help="network architecture")
+    parser.add_argument(
+        "--logdir", default=None, type=str,
+        help="path of log directory")
+    parser.add_argument(
+        "--checkpoint", default=None, type=str,
+        help="path of checkpoint")
+    
     args = parser.parse_args()
 
     #################################################################################
 
-    # Make log directory
-    logdir = get_default_logdir_train()
-    tf.gfile.MakeDirs(logdir)
+    # check logdir and checkpoint and make log directory if necessary
+    if args.checkpoint:
+        logdir, ckpt = os.path.split(args.checkpoint)
+    else:
+        ckpt = None
+        if args.logdir:
+            logdir = args.logdir
+        else:
+            logdir = get_default_logdir_train()
+            tf.gfile.MakeDirs(logdir)
+
     
     # set log level
     logging.basicConfig(
@@ -82,9 +97,7 @@ def main():
     
     # Load model and trainer
     model = MODEL(arch)
-    loss = model.loss(train_data)
-    valid = model.validate(valid_data)
-    trainer = TRAINER(loss, valid, arch, args, logdir)
+    trainer = TRAINER(model, train_data, valid_data, arch, args, logdir, ckpt)
     
     # Train the model
     trainer.train()
