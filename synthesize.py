@@ -114,7 +114,7 @@ def main():
     # Load statistics
     mu_s, std_s = np.fromfile(os.path.join(arch['stat_dir'], '{}.npf'.format(src)), np.float32)
     mu_t, std_t = np.fromfile(os.path.join(arch['stat_dir'], '{}.npf'.format(trg)), np.float32)
-    gv_t = loadmat(os.path.join(arch['stat_dir'], f'gv_{input_feat}', '{}.mat'.format(trg)))[f'gv_{output_feat}'].flatten()
+    gv_t = loadmat(os.path.join(arch['stat_dir'], 'gv_{}'.format(input_feat), '{}.mat'.format(trg)))['gv_{}'.format(output_feat)].flatten()
     stats = {
         'mu_s' : mu_s, 'std_s' : std_s,
         'mu_t' : mu_t, 'std_t' : std_t,
@@ -125,7 +125,7 @@ def main():
     tf.gfile.MakeDirs(os.path.join(args.logdir, 'converted-wav'))
 
     # Get and divide list
-    bin_list = sorted(tf.gfile.Glob(os.path.join(args.logdir, f'converted-{output_feat}', '*.bin')))
+    bin_list = sorted(tf.gfile.Glob(os.path.join(args.logdir, 'converted-{}'.format(output_feat), '*.bin')))
     feat_list = sorted(tf.gfile.Glob(arch['conversion']['test_file_pattern'].format(src)))
     assert(len(bin_list) == len(feat_list))
     file_list = list(zip(bin_list, feat_list))
