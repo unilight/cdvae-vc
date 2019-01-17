@@ -57,7 +57,7 @@ def read_and_synthesize(file_list, arch, MCD, ):
         # MCD 
         diff2sum = np.sum((cvt_mcc_dtw - trg_mcc_dtw)**2, 1)
         mcd = np.mean(10.0 / np.log(10.0) * np.sqrt(2 * diff2sum))
-        logging.info(f'{basename} {mcd}')
+        logging.info('{} {}'.format(basename, mcd))
         MCD.append(mcd)
 
 def main():
@@ -101,7 +101,7 @@ def main():
     output_feat = arch['conversion']['output']
     
     # Get and divide list
-    bin_list = sorted(tf.gfile.Glob(os.path.join(args.logdir, f'converted-{output_feat}', '*.bin')))
+    bin_list = sorted(tf.gfile.Glob(os.path.join(args.logdir, 'converted-{}'.format(output_feat), '*.bin')))
     src_feat_list = sorted(tf.gfile.Glob(arch['conversion']['test_file_pattern'].format(src)))
     trg_feat_list = sorted(tf.gfile.Glob(arch['conversion']['test_file_pattern'].format(trg)))
     assert(len(bin_list) == len(src_feat_list))
@@ -124,7 +124,7 @@ def main():
             p.join()
 
         mMCD = np.mean(np.array(MCD))
-        logging.info(f'Mean MCD: {mMCD}')
+        logging.info('Mean MCD: {}'.format(mMCD))
 
 if __name__ == '__main__':
     main()
