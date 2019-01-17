@@ -108,7 +108,7 @@ def main():
     
     # make directories for output
     tf.gfile.MakeDirs(os.path.join(output_dir, 'latent'))
-    tf.gfile.MakeDirs(os.path.join(output_dir, f'converted-{output_feat}'))
+    tf.gfile.MakeDirs(os.path.join(output_dir, 'converted-{}'.format(output_feat)))
     
     # Define session
     with tf.Session() as sess:
@@ -127,7 +127,7 @@ def main():
         for f in files:
             basename = os.path.split(f)[-1]
             path_to_latent = os.path.join(output_dir, 'latent', '{}-{}-{}'.format(args.src, args.trg, basename))
-            path_to_cvt = os.path.join(output_dir, f'converted-{output_feat}', '{}-{}-{}'.format(args.src, args.trg, basename))
+            path_to_cvt = os.path.join(output_dir, 'converted-{}'.format(output_feat), '{}-{}-{}'.format(args.src, args.trg, basename))
             logging.info(basename)
 
             # load source features
