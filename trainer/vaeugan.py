@@ -70,7 +70,6 @@ class VAEUGANTrainer(Trainer):
         logging.info(msg)
 
     def train(self):
-        vae_saver = tf.train.Saver()
         run_metadata = tf.RunMetadata()
         merged_summary_op = tf.summary.merge_all()
 
@@ -98,7 +97,7 @@ class VAEUGANTrainer(Trainer):
         }
 
         # define hooks
-        saver = tf.train.Saver()
+        saver = tf.train.Saver(max_to_keep=100)
         saver_hook = tf.train.CheckpointSaverHook(
                 checkpoint_dir=self.dirs, 
                 save_steps = self.arch['training']['save_freq'],
@@ -138,8 +137,9 @@ class VAEUGANTrainer(Trainer):
                     feed_dict = {
                         self.opt['gamma']: 0.}
 
+                    # Display progress when reached a certain frequency
                     if (step+1) % self.arch['training']['log_freq'] == 0:
-                        # Display progress when reached a certain frequency
+                        
                         _, results = sess.run([vae_fetches, info_fetches], feed_dict=feed_dict)
                         self.print_log(results)
                         '''
