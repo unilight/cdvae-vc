@@ -119,3 +119,15 @@ def log_loss(x, xh):
                 slim.flatten(xh),
                 tf.zeros_like(slim.flatten(xh))),
         )
+
+def gradient_penalty_loss(x, xh, discriminator):
+    batch_size, _, _, _ = x.get_shape().as_list()
+
+    alpha_dist = tf.contrib.distributions.Uniform(low=0., high=1.)
+    alpha = alpha_dist.sample((batch_size, 1, 1, 1))
+    interpolated = x + alpha * (xh - x)
+    inte_logit = discriminator(interpolated)
+    gradients = tf.gradients(inte_logit, [interpolated,])[0]
+    grad_l2 = tf.sqrt(tf.reduce_sum(tf.square(gradients), axis=[1,2,3]))
+    gradient_penalty = tf.reduce_mean((grad_l2-1)**2)
+    return gradient_penalty
