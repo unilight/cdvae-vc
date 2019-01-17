@@ -20,7 +20,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="train the model.")
     parser.add_argument(
-        "--architecture", default='architectures/architecture-cdvae.json', type=str,
+        "--architecture", default='architectures/architecture-vae-ugan.json', type=str,
         help="network architecture")
     parser.add_argument(
         "--logdir", default=None, type=str,
@@ -28,7 +28,6 @@ def main():
     parser.add_argument(
         "--checkpoint", default=None, type=str,
         help="path of checkpoint")
-    
     args = parser.parse_args()
 
     #################################################################################
