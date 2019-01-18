@@ -24,13 +24,21 @@ class Trainer(object):
         # define saver
         self.saver = tf.train.Saver()
         
+        # define scaffold
+        self.scaffold = tf.train.Scaffold(saver = self.saver)
+
         # define hooks
-        hooks = self.get_hooks(self.saver)
+        hooks = self.get_hooks()
 
         # Initialize TensorFlow monitored training session
-        self.sess =  tf.train.MonitoredTrainingSession(
+        session_creator = tf.train.ChiefSessionCreator(
+                                scaffold = self.scaffold,
+                                checkpoint_dir = self.dirs,
+                                config = self.sess_config,
+                                )
+        self.sess =  tf.train.MonitoredSession(
+                        session_creator=session_creator,
                         hooks = hooks,
-                        config = self.sess_config,
                         )
 
     def _optimize(self):
@@ -46,24 +54,33 @@ class Trainer(object):
             allow_soft_placement=True,
             gpu_options=tf.GPUOptions(allow_growth=True))
 
-    def get_hooks(self, saver):
-        merged_summary_op = tf.summary.merge_all()
-        
+    def get_hooks(self):
+        # self.merged_summary_op = tf.summary.merge_all()
+       
         saver_hook = tf.train.CheckpointSaverHook(
                 checkpoint_dir = self.dirs, 
                 save_steps = self.arch['training']['save_freq'],
-                saver = saver,
+                saver = self.saver,
                 )
+
+        # use scaffold to get summary op
         summary_hook = tf.train.SummarySaverHook(
                 save_steps = self.arch['training']['summary_freq'],
-                summary_op = merged_summary_op,
+                scaffold = self.scaffold,
+                # summary_op = self.merged_summary_op,
                 output_dir = self.dirs
                 )
+
         stop_hook = tf.train.StopAtStepHook(
                 last_step = self.arch['training']['max_iter']
                 )
 
-        return [saver_hook, summary_hook, stop_hook]
+        step_counter_hook = tf.train.StepCounterHook(
+                output_dir = self.dirs,
+                every_n_steps = self.arch['training']['summary_freq']
+                )
+
+        return [saver_hook, summary_hook, stop_hook, step_counter_hook]
     
     def print_log(self, msg):
         print(msg)

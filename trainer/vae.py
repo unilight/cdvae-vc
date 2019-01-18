@@ -34,6 +34,8 @@ class VAETrainer(Trainer):
 
     def train(self):
 
+        # self.writer = tf.summary.FileWriter(self.dirs, graph=tf.get_default_graph())
+
         # get fetches
         fetches = self.model.fetches(self.loss, self.valid, self.opt)
 
@@ -46,7 +48,7 @@ class VAETrainer(Trainer):
         # Iterate through training steps
         while not sess.should_stop():
 
-            # update global step
+            # GET global step; global step isn'y updated here
             step = tf.train.global_step(sess, self.opt['global_step'])
             
             # Display progress when reached a certain frequency
@@ -55,6 +57,7 @@ class VAETrainer(Trainer):
                 msg = self.model.get_train_log(results)
                 self.print_log(msg)
 
+                """
                 # validation
                 valid_loss_all = []
                 for _ in range(self.valid['num_files']):
@@ -63,6 +66,7 @@ class VAETrainer(Trainer):
                 
                 msg = self.model.get_valid_log(results['step'], valid_loss_all)
                 self.print_log(msg)
+                """
 
             else:
                 _ = sess.run(fetches['update'])
