@@ -28,13 +28,13 @@ class VAEUGANTrainer(Trainer):
         sp_g_vars = [v for v in var_list if 'SP_Decoder' in v.name]
         sp_d_vars = [v for v in var_list if 'SP_Discriminator' in v.name]
 
-        r = tf.placeholder(shape=[], dtype=tf.float32)
+        r_sp = tf.placeholder(shape=[], dtype=tf.float32)
         k = tf.constant(self.arch['training']['clamping'], shape=[])
-        self.loss['dis'] = self.loss['dis'] / k 
+        self.loss['dis_sp2sp'] /= k
 
         obj_sp_Ez = self.loss['D_KL'] - self.loss['recon']
-        obj_sp_Gx = r * self.loss['dis'] - self.loss['recon']
-        obj_sp_d = - self.loss['dis'] * k 
+        obj_sp_Gx = r_sp * self.loss['dis_sp2sp'] - self.loss['recon']
+        obj_sp_d = - self.loss['dis_sp2sp'] * k
 
         with tf.name_scope('Update'):
             opt_sp_d = optimizer.minimize(obj_sp_d, var_list=sp_d_vars)
@@ -56,138 +56,76 @@ class VAEUGANTrainer(Trainer):
             'opt_d': opt_sp_ds,
             'opt_g': opt_sp_g,
             'opt_e': opt_sp_e,
-            'gamma': r,
+            'gamma_sp': r_sp,
             'global_step': global_step
         }
 
-
-    def print_log(self, result):
-        msg = 'Iter {:05d}: '.format(result['step'])
-        msg += 'recon = {:.4} '.format(result['recon'])
-        msg += 'KL = {:.4} '.format(result['D_KL'])
-        msg += 'Dis = {:.4} '.format(result['dis'])
-        print(msg)
-        logging.info(msg)
-
     def train(self):
-        run_metadata = tf.RunMetadata()
-        merged_summary_op = tf.summary.merge_all()
 
-        """ define fetches
-            update_fetches: optimization only
-            info_fetches: get logging infos
-            valid_fetches: for validation
-        """
-        vae_fetches = {
-            "opt_e": self.opt['opt_e'],
-            "opt_g": self.opt['opt_g']
-        }
-        gan_fetches = {
-            "opt_d": self.opt['opt_d']
-        }
-        info_fetches = {
-            "D_KL": self.loss['D_KL'],
-            "recon": self.loss['recon'],
-            "dis": self.loss['dis'],
-            "step": self.opt['global_step'],
-        }
-        valid_fetches = {
-            "recon": self.valid['recon_sp'],
-            "step": self.opt['global_step']
-        }
+        # get fetches
+        fetches = self.model.fetches(self.loss, self.valid, self.opt)
 
-        # define hooks
-        saver = tf.train.Saver(max_to_keep=100)
-        saver_hook = tf.train.CheckpointSaverHook(
-                checkpoint_dir=self.dirs, 
-                save_steps = self.arch['training']['save_freq'],
-                saver=saver
-                )
-        summary_hook = tf.train.SummarySaverHook(
-                save_steps = self.arch['training']['summary_freq'],
-                summary_op = merged_summary_op,
-                output_dir = self.dirs
-                )
-        stop_hook = tf.train.StopAtStepHook(
-                last_step = self.arch['training']['vae_iter'] + self.arch['training']['gan_iter']
-                )
-        
-        # Define settings for gpu
-        sess_config = tf.ConfigProto(
-            allow_soft_placement=True,
-            gpu_options=tf.GPUOptions(allow_growth=True))
-
-        # Initialize TensorFlow monitored training session
-        with tf.train.MonitoredTrainingSession(
-                hooks=[saver_hook, summary_hook, stop_hook],
-                config = sess_config,
-                ) as sess:
-
-            # load pretrained model
-            if self.args.restore_path:
-                load(saver, sess, self.args.restore_path)
+        # get session (defined in initialization)
+        sess = self.sess
             
-            # Iterate through training steps
-            while not sess.should_stop():
+        # restore 
+        self.restore()
+            
+        # Iterate through training steps
+        while not sess.should_stop():
 
-                # update global step
-                step = tf.train.global_step(sess, self.opt['global_step'])
-                
-                if (step+1) <= self.arch['training']['vae_iter']:
-                    feed_dict = {
-                        self.opt['gamma']: 0.}
+            # update global step
+            step = tf.train.global_step(sess, self.opt['global_step'])
+            
+            if (step+1) <= self.arch['training']['vae_iter']:
+                feed_dict = {
+                    self.opt['gamma_sp']: 0.}
 
-                    # Display progress when reached a certain frequency
-                    if (step+1) % self.arch['training']['log_freq'] == 0:
-                        
-                        _, results = sess.run([vae_fetches, info_fetches], feed_dict=feed_dict)
-                        self.print_log(results)
-                        '''
-                        # validation
-                        valid_loss_all = []
-                        for _ in range(self.valid['num_files']):
-                            results = sess.run(valid_fetches)
-                            valid_loss_all.append(results['recon'])
-                        
-                        valid_loss_avg = np.mean(np.array(valid_loss_all))
-                        msg = 'Validation in Iter {:05d}: '.format(results['step'])
-                        msg += 'recon = {:.4} '.format(valid_loss_avg)
-                        print(msg)
-                        logging.info(msg)
-                        '''
+                # Display progress when reached a certain frequency
+                if (step+1) % self.arch['training']['log_freq'] == 0:
 
-                    else:
-                        _ = sess.run(vae_fetches, feed_dict=feed_dict)
+                    _, results = sess.run([fetches['vae'], fetches['info']], feed_dict=feed_dict)
+                    msg = self.model.get_train_log(results)
+                    self.print_log(msg)
+
+                    '''
+                    # validation
+                    valid_loss_all = []
+                    for _ in range(self.valid['num_files']):
+                        results = sess.run(fetches['valid'])
+                        valid_loss_all.append(results)
+                    
+                    msg = self.model.get_valid_log(results['step'], valid_loss_all)
+                    self.print_log(msg)
+                    '''
 
                 else:
-                    feed_dict = {
-                        self.opt['gamma']: self.arch['training']['gamma']}
+                    _ = sess.run(fetches['vae'], feed_dict=feed_dict)
 
-                    if (step+1) - self.arch['training']['vae_iter'] < 25 or (step+1) % 100 == 0:
-                        nIterD = self.arch['training']['n_unroll_intense']
-                    else:
-                        nIterD = self.arch['training']['n_unroll']
+            else:
+                feed_dict = {
+                    self.opt['gamma_sp']: self.arch['training']['gamma_sp']}
 
-                    for _ in range(nIterD):
-                        sess.run(gan_fetches)
+                for _ in range(self.arch['training']['nIterD']):
+                    sess.run(fetches['gan'])
 
-                    if (step+1) % self.arch['training']['log_freq'] == 0:
-                        # Display progress when reached a certain frequency
-                        _, results = sess.run([vae_fetches, info_fetches], feed_dict=feed_dict)
-                        self.print_log(results)
-                        '''
-                        # validation
-                        valid_loss_all = []
-                        for _ in range(self.valid['num_files']):
-                            results = sess.run(valid_fetches)
-                            valid_loss_all.append(results['recon'])
-                        
-                        valid_loss_avg = np.mean(np.array(valid_loss_all))
-                        msg = 'Validation in Iter {:05d}: '.format(results['step'])
-                        msg += 'recon = {:.4} '.format(valid_loss_avg)
-                        print(msg)
-                        logging.info(msg)
-                        '''
+                # Display progress when reached a certain frequency
+                if (step+1) % self.arch['training']['log_freq'] == 0:
 
-                    else:
-                        _ = sess.run(vae_fetches, feed_dict=feed_dict)
+                    _, results = sess.run([fetches['vae'], fetches['info']], feed_dict=feed_dict)
+                    msg = self.model.get_train_log(results)
+                    self.print_log(msg)
+                    
+                    '''
+                    # validation
+                    valid_loss_all = []
+                    for _ in range(self.valid['num_files']):
+                        results = sess.run(fetches['valid'])
+                        valid_loss_all.append(results)
+                    
+                    msg = self.model.get_valid_log(results['step'], valid_loss_all)
+                    self.print_log(msg)
+                    '''
+
+                else:
+                    _ = sess.run(fetches['vae'], feed_dict=feed_dict)
