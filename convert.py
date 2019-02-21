@@ -97,6 +97,8 @@ def main():
     x = tf.expand_dims(tf.expand_dims(x, 1), -1)
     yh_pl = tf.placeholder(dtype=tf.int64, shape=[1,])
     yh = yh_pl * tf.ones(shape=[tf.shape(x)[0],], dtype=tf.int64)
+    yp_pl = tf.placeholder(dtype=tf.int64, shape=[1,])
+    yp = yp_pl * tf.ones(shape=[tf.shape(x)[0],], dtype=tf.int64)
     
     # Define model
     model = MODEL(arch)
@@ -105,10 +107,15 @@ def main():
     xh = tf.squeeze(xh)
     if output_feat in normalizers:
         xh = normalizers[output_feat].backward_process(xh)
+    xp = model.decode(z, yp)
+    xp = tf.squeeze(xp)
+    if output_feat in normalizers:
+        xp = normalizers[output_feat].backward_process(xp)
     
     # make directories for output
     tf.gfile.MakeDirs(os.path.join(output_dir, 'latent'))
     tf.gfile.MakeDirs(os.path.join(output_dir, 'converted-{}'.format(output_feat)))
+    tf.gfile.MakeDirs(os.path.join(output_dir, 'anasyn-{}'.format(output_feat)))
     
     # Define session
     with tf.Session() as sess:
@@ -128,21 +135,25 @@ def main():
             basename = os.path.split(f)[-1]
             path_to_latent = os.path.join(output_dir, 'latent', '{}-{}-{}'.format(args.src, args.trg, basename))
             path_to_cvt = os.path.join(output_dir, 'converted-{}'.format(output_feat), '{}-{}-{}'.format(args.src, args.trg, basename))
+            path_to_anasyn = os.path.join(output_dir, 'anasyn-{}'.format(output_feat), '{}-{}-{}'.format(args.src, args.src, basename))
             logging.info(basename)
 
             # load source features
             src_data = Whole_feature_reader(f, arch['feat_param'])
 
             # 
-            latent, cvt = sess.run([z, xh],
-                               feed_dict={yh_pl : np.asarray([spk_list.index(args.trg)]),
-                                          x_pl : src_data[input_feat] }
-                              )
+            latent, cvt, anasyn = sess.run([z, xh, xp],
+                                   feed_dict={yh_pl : np.asarray([spk_list.index(args.trg)]),
+                                              yp_pl : np.asarray([spk_list.index(args.src)]),
+                                              x_pl : src_data[input_feat] }
+                                  )
             # save bin
             with open(path_to_latent, 'wb') as fp:
                 fp.write(latent.tostring())
             with open(path_to_cvt, 'wb') as fp:
                 fp.write(cvt.tostring())
+            with open(path_to_anasyn, 'wb') as fp:
+                fp.write(anasyn.tostring())
 
 if __name__ == '__main__':
     main()

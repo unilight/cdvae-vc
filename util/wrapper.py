@@ -48,8 +48,11 @@ def get_default_logdir_train(logdir_root='logdir'):
     print('Using default logdir: {}'.format(logdir))        
     return logdir
 
-def get_default_logdir_output(args):
+def get_default_logdir_output(args, conversion = True):
     STARTED_DATESTRING = datetime.now().strftime('%0m%0d-%0H%0M-%0S-%Y')
-    logdir = os.path.join(args.logdir, STARTED_DATESTRING+'-{}-{}'.format(args.src, args.trg))
+    if conversion:
+        logdir = os.path.join(args.logdir, STARTED_DATESTRING+'-{}-{}'.format(args.src, args.trg))
+    else:
+        logdir = os.path.join(args.logdir, STARTED_DATESTRING+'-latent-codes')
     print('Logdir: {}'.format(logdir))        
     return logdir

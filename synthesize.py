@@ -26,7 +26,7 @@ from preprocessing.f0transformation import log_linear_transformation
 
 def read_and_synthesize(file_list, arch, stats, ):
     
-    for i, (bin_path, feat_path) in enumerate(file_list):
+    for i, (bin_path, anasyn_path, feat_path) in enumerate(file_list):
         input_feat = arch['conversion']['input']
         input_feat_dim = arch['feat_param']['dim'][input_feat]
         output_feat = arch['conversion']['output']
@@ -36,10 +36,12 @@ def read_and_synthesize(file_list, arch, stats, ):
         basename = os.path.splitext(os.path.split(bin_path)[-1])[0]
         wav_name = os.path.join(output_dir, basename + '.wav')
         gv_wav_name = os.path.join(output_dir, basename + '-gv.wav')
+        plant_wav_name = os.path.join(output_dir, basename + '-plant.wav')
 
-        # read source features and converted spectral features
+        # read source features , anasyn features and converted spectral features
         src_data = Whole_feature_reader(feat_path, arch['feat_param'])
         cvt = np.fromfile(bin_path, dtype = np.float32).reshape([-1, input_feat_dim])
+        anasyn = np.fromfile(anasyn_path, dtype = np.float32).reshape([-1, input_feat_dim])
 
         # f0 conversion
         lf0 = log_linear_transformation(src_data['f0'], stats)
@@ -68,6 +70,45 @@ def read_and_synthesize(file_list, arch, stats, ):
                         src_data['ap'].astype(np.float64).copy(order='C'),
                         en_cvt_gv.astype(np.float64).copy(order='C'),
                         output_feat)
+
+        ##########################################################
+
+        # spectral planting
+        en_anasyn = np.c_[src_data['en_mcc'], anasyn]
+        
+        """
+        ## get sp of anasyn and cvt
+        sp_cvt = pysptk.mc2sp(cvt, arch['feat_param']['mcep_alpha'], arch['feat_param']['fftl'])
+        sp_anasyn = pysptk.mc2sp(anasyn, arch['feat_param']['mcep_alpha'], arch['feat_param']['fftl'])
+
+        ## spectral gain
+        gain = sp_cvt / sp_anasyn
+
+        ## planting
+        src_idx = np.where(src_data['f0']>0)[0]
+        sp_h = np.expand_dims(src_data['en_sp'], 1) * np.power(10., src_data['sp'].copy())
+        sp_h[src_idx] = sp_h[src_idx] * gain[src_idx]
+        
+        """
+        
+        ## gain
+        gain = cvt - anasyn
+
+        ## planting
+        src_idx = np.where(src_data['f0']>0)[0]
+        mcc_h = src_data['mcc'].copy()
+        mcc_h[src_idx] = mcc_h[src_idx] + gain[src_idx]
+        mcc_h = np.c_[src_data['en_mcc'], mcc_h]
+
+
+        world_synthesis(plant_wav_name, arch['feat_param'],
+                        lf0.astype(np.float64).copy(order='C'),
+                        src_data['ap'].astype(np.float64).copy(order='C'),
+                        #sp_h.astype(np.float64).copy(order='C'),
+                        #'sp')
+                        mcc_h.astype(np.float64).copy(order='C'),
+                        'mcc')
+
 
 
 def main():
@@ -126,9 +167,10 @@ def main():
 
     # Get and divide list
     bin_list = sorted(tf.gfile.Glob(os.path.join(args.logdir, 'converted-{}'.format(output_feat), '*.bin')))
+    anasyn_list = sorted(tf.gfile.Glob(os.path.join(args.logdir, 'anasyn-{}'.format(output_feat), '*.bin')))
     feat_list = sorted(tf.gfile.Glob(arch['conversion']['test_file_pattern'].format(src)))
     assert(len(bin_list) == len(feat_list))
-    file_list = list(zip(bin_list, feat_list))
+    file_list = list(zip(bin_list, anasyn_list, feat_list))
     logging.info("number of utterances = %d" % len(file_list))
     file_lists = np.array_split(file_list, args.n_jobs)
     file_lists = [f_list.tolist() for f_list in file_lists]
