@@ -1,0 +1,101 @@
+{
+    "model": "CDVAEGAN",
+    "model_module": "model.cdvae-gan-mcc",
+    "trainer": "CDVAEGANTrainer",
+    "trainer_module": "trainer.cdvae-gan-mcc",
+    "stat_dir": "/mnt/md1/datasets/vcc2018/world/etc-new",
+    "spklist": "/mnt/md1/datasets/vcc2018/world/etc/speakers.tsv",
+
+    "z_dim": 16,
+	"y_dim": 12,
+	"y_emb_dim": 16,
+    "encoder": {
+        "sp":{
+            "kernel": [[3, 1], [3, 1], [3, 1], [3, 1], [3, 1]],
+            "stride": [[1, 1], [1, 1], [1, 1], [1, 1], [1, 1]],
+            "output": [1024, 512, 256, 64, 32]
+        },
+        "mcc":{
+            "kernel": [[3, 1], [3, 1], [3, 1], [3, 1], [3, 1]],
+            "stride": [[1, 1], [1, 1], [1, 1], [1, 1], [1, 1]],
+            "output": [512, 256, 128, 64, 32]
+        }
+	},
+	"generator": {
+        "sp":{
+            "kernel": [[3, 1], [3, 1], [3, 1], [3, 1], [3, 1]],
+            "stride": [[1, 1], [1, 1], [1, 1], [1, 1], [1, 1]],
+            "output": [128, 256, 512, 1024, 513]
+        },
+        "mcc":{
+            "kernel": [[3, 1], [3, 1], [3, 1], [3, 1], [3, 1]],
+            "stride": [[1, 1], [1, 1], [1, 1], [1, 1], [1, 1]],
+            "output": [64, 128, 256, 512, 34]
+        }
+    },
+    "discriminator": {
+        "sp":{
+            "kernel": [[3, 1], [3, 1], [3, 1], [3, 1], [3, 1]],
+            "stride": [[1, 1], [1, 1], [1, 1], [1, 1], [1, 1]],
+            "output": [1024, 512, 256, 64, 32]
+        },
+        "mcc":{
+            "kernel": [[3, 1], [3, 1], [3, 1], [3, 1], [3, 1]],
+            "stride": [[1, 1], [1, 1], [1, 1], [1, 1], [1, 1]],
+            "output": [512, 256, 128, 64, 32]
+        }
+	},
+	"training": {
+        "train_file_pattern": ["/mnt/md1/datasets/vcc2018/world/bin-dynamic/VAD/tr/*/[12]00[0-6]?.bin",
+                               "/mnt/md1/datasets/vcc2018/world/bin-dynamic/VAD/tr/*/[12]0070.bin"],
+        "valid_file_pattern": ["/mnt/md1/datasets/vcc2018/world/bin-dynamic/VAD/tr/*/[12]007[1-9].bin",
+                               "/mnt/md1/datasets/vcc2018/world/bin-dynamic/VAD/tr/*/[12]008[0-1].bin"],
+        "batch_size": 16,
+        "crop_length": 128, 
+		"lr": 1e-4,
+		"beta1": 0.5,
+        "beta2": 0.999,
+        "nIterD": 5,
+        "vae_iter": 100000,
+        "gan_iter": 300000,
+        "max_iter": 400000,
+        "save_freq": 10000, 
+        "summary_freq": 1000, 
+        "log_freq": 1000,
+        "gamma": 50,
+        "gp_weight": 10
+	},
+    "conversion": {
+        "input": "mcc",
+        "output": "mcc",
+        "test_file_pattern": "/mnt/md1/datasets/vcc2018/world/bin-dynamic/no_VAD/ev/{}/*.bin"
+    },
+    "feat_param":{
+        "fs": 22050,
+        "shiftms": 5,
+        "fftl": 1024,
+        "mcep_alpha": 0.455,
+        "sp_dim": 513,
+        "mcc_dim": 34,
+        "feat_dim": 2710,
+        "dim":{
+            "sp": 513,
+            "mcc": 34,
+            "feat": 2710
+        }
+    },
+    "normalizer_files":{
+        "sp": {
+            "type": "minmax",
+            "dim": null,
+            "max": "sp_max.npf",
+            "min": "sp_min.npf"
+        },
+        "mcc": {
+            "type": "minmax",
+            "dim": null,
+            "max": "mcc_max.npf",
+            "min": "mcc_min.npf"
+        }
+    }
+}
