@@ -8,7 +8,7 @@ import numpy as np
 class VAE(object):
     def __init__(self, arch):
         '''
-        Variational Auto Encoder (CDVAE)
+        Variational Auto Encoder (VAE)
         Arguments:
             `arch`: network architecture (`dict`)
         '''
@@ -59,33 +59,56 @@ class VAE(object):
                 x, o, k, s, lrelu,
                 name='Conv-{}'.format(i)
             )
-        x = slim.flatten(x)
-        z_mu = tf.layers.dense(x, self.arch['z_dim'], name='Dense-mu')
-        z_lv = tf.layers.dense(x, self.arch['z_dim'], name='Dense-lv')
+
+        # carefully design the architecture so that now x has shape [N, C, n_frames, 1]
+        batch_size, c, n_frames, w = x.get_shape().as_list()
+        x = tf.transpose(x, perm=[0, 2, 1, 3]) # [N, n_frames, C, 1]
+        x = tf.squeeze(x, axis=[-1]) # [N, n_frames, C]
+        z_mu = tf.layers.dense(x, self.arch['z_dim'], name='Dense-mu') # [N, n_frames, z_dim]
+        z_lv = tf.layers.dense(x, self.arch['z_dim'], name='Dense-lv') # [N, n_frames, z_dim]
         return z_mu, z_lv
 
     def sp_decoder(self, z, y):
         net = self.arch['generator']['sp']
         return self._generator(z, y, net)
-    
+
     def _generator(self, z, y, net):
-        h, w, c = net['hwc']
 
-        y = tf.nn.embedding_lookup(self.y_emb, y)
-        with tf.variable_scope('Merge'):
-            x = self._merge([z, y], h * w * c)
+        x = tf.expand_dims(z, 1) # [N, 1, n_frames, z_dim]
+        x = tf.transpose(x, perm=[0, 3, 2, 1]) # [N, z_dim, n_frames, 1]
+        y = tf.nn.embedding_lookup(self.y_emb, y) # [N, n_frames, y_emb_dim]
+        y = tf.expand_dims(y, 1) # [N, 1, n_frames, y_emb_dim]
 
-        x = tf.reshape(x, [-1, c, h, w])
         for i, (o, k, s) in enumerate(zip(net['output'], net['kernel'], net['stride'])):
             with tf.variable_scope('Conv-{}'.format(i)):
-                x = tf.layers.conv2d_transpose(x, o, k, s,
-                    padding='same',
-                    data_format='channels_first',
-                )
+
+                # concat y along channel axis
+                y_transpose = tf.transpose(y, perm=[0, 3, 2, 1]) # [N, y_emb_dim, n_frames, 1]
+                x = tf.concat([x, y_transpose], axis=1) # [N, channels + y_emb_dim, n_frames, 1]
+
                 if i < len(net['output']) -1:
-                    x = Layernorm(x, [1, 2, 3], 'layernorm')
-                    x = lrelu(x)
-        return x
+                    x_tanh = tf.layers.conv2d_transpose(x, o, k, s,
+                        padding='same',
+                        data_format='channels_first',
+                    )
+                    x_tanh = Layernorm(x_tanh, [1, 2, 3], 'Layernorm-{}-tanh'.format(i))
+                    
+                    x_sigmoid = tf.layers.conv2d_transpose(x, o, k, s,
+                        padding='same',
+                        data_format='channels_first',
+                    )
+                    x_sigmoid = Layernorm(x_sigmoid, [1, 2, 3], 'Layernorm-{}-sigmoid'.format(i))
+
+                    # GLU
+                    with tf.variable_scope('GLU'):
+                        x = tf.sigmoid(x_sigmoid) * tf.tanh(x_tanh)
+                else:
+                    x = tf.layers.conv2d_transpose(x, o, k, s,
+                        padding='same',
+                        data_format='channels_first',
+                    )
+
+        return x  # [N, feat_dim, n_frames, 1]
 
     def loss(self, data):
 
@@ -99,12 +122,12 @@ class VAE(object):
 
         kl_loss_sp = kl_loss(sp_z_mu, sp_z_lv)
         recon_loss_sp = log_loss(x_sp, x_sp_sp)
+        
 
         loss = dict()
-        loss['D_KL'] = (  kl_loss_sp
-                        )
-        loss['recon'] = (  recon_loss_sp 
-                         )
+        loss['D_KL'] = kl_loss_sp
+
+        loss['recon'] = recon_loss_sp 
 
         loss['all'] = - loss['recon'] + loss['D_KL']
 
@@ -119,10 +142,12 @@ class VAE(object):
 
         x_sp = data['sp']
         y = data['speaker']
+        y = tf.expand_dims(y, 0)
         
         # Use sp as source
         z_sp, _ = self.sp_enc(x_sp)
         x_sp_sp = self.sp_dec(z_sp, y)
+        x_sp_mcc = self.mcc_dec(z_sp, y)
 
         recon_loss_sp = log_loss(x_sp, x_sp_sp)
         
@@ -134,7 +159,7 @@ class VAE(object):
         results['num_files'] = data['num_files']
         
         return results
-        
+
     def get_train_log(self, result):
         msg = 'Iter {:05d}: '.format(result['step'])
         msg += 'recon = {:.4} '.format(result['recon'])
@@ -162,7 +187,7 @@ class VAE(object):
             "step": opt['global_step'],
         }
         valid_fetches = {
-            "recon": valid['recon_sp'],
+            "recon": valid['recon_mcc'],
             "step": opt['global_step'],
         }
 
