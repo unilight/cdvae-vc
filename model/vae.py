@@ -4,15 +4,18 @@ from util.layers import (GaussianKLD, GaussianLogDensity, GaussianSampleLayer,
                          Layernorm, conv2d_nchw_layernorm, lrelu,
                          kl_loss, log_loss)
 import numpy as np
+from util.wrapper import ValueWindow
 
 class VAE(object):
-    def __init__(self, arch):
+    def __init__(self, arch, normalizers=None):
         '''
         Variational Auto Encoder (VAE)
         Arguments:
             `arch`: network architecture (`dict`)
         '''
         self.arch = arch
+        self.normalizers = normalizers
+        self.feat_type = arch['feat_type']
 
         with tf.name_scope('SpeakerCode'):
             self.y_emb = self._l2_regularized_embedding(
@@ -20,26 +23,13 @@ class VAE(object):
                 self.arch['z_dim'],
                 'y_embedding')
 
-        self.sp_enc = tf.make_template(
-            'SP_Encoder',
-            self.sp_encoder)
+        self.enc = tf.make_template(
+            'Encoder',
+            self.encoder)
         
-        self.sp_dec = tf.make_template(
-            'SP_Decoder',
-            self.sp_decoder)
-
-    def _merge(self, var_list, fan_out, l2_reg=1e-6):
-        x = 0.
-        with slim.arg_scope(
-            [slim.fully_connected],
-            num_outputs=fan_out,
-            weights_regularizer=slim.l2_regularizer(l2_reg),
-            normalizer_fn=None,
-            activation_fn=None):
-            for var in var_list:
-                x = x + slim.fully_connected(var)
-        return slim.bias_add(x)
-
+        self.dec = tf.make_template(
+            'Decoder',
+            self.decoder)
 
     def _l2_regularized_embedding(self, n_class, h_dim, scope_name, var_name='y_emb'):
         with tf.variable_scope(scope_name):
@@ -49,11 +39,13 @@ class VAE(object):
                 regularizer=slim.l2_regularizer(1e-6))
         return embeddings
 
-    def sp_encoder(self, x):
-        net = self.arch['encoder']['sp']
+    def encoder(self, x):
+        net = self.arch['encoder'][self.feat_type]
         return self._encoder(x, net)
 
     def _encoder(self, x, net):
+        x = tf.transpose(x, perm=[0, 3, 2, 1]) # [N, d, n_frames, 1]
+        
         for i, (o, k, s) in enumerate(zip(net['output'], net['kernel'], net['stride'])):
             x = conv2d_nchw_layernorm(
                 x, o, k, s, lrelu,
@@ -68,8 +60,8 @@ class VAE(object):
         z_lv = tf.layers.dense(x, self.arch['z_dim'], name='Dense-lv') # [N, n_frames, z_dim]
         return z_mu, z_lv
 
-    def sp_decoder(self, z, y):
-        net = self.arch['generator']['sp']
+    def decoder(self, z, y):
+        net = self.arch['generator'][self.feat_type]
         return self._generator(z, y, net)
 
     def _generator(self, z, y, net):
@@ -108,104 +100,75 @@ class VAE(object):
                         data_format='channels_first',
                     )
 
-        return x  # [N, feat_dim, n_frames, 1]
+        x = tf.squeeze(x, axis=[-1]) # [N, C, n_frames]
+        x = tf.transpose(x, perm=[0, 2, 1]) # [N, n_frames, C]
+        return x
 
     def loss(self, data):
 
-        x_sp = data['sp']
+        x = data[self.feat_type]
         y = data['speaker']
         
-        # Use sp as source
-        sp_z_mu, sp_z_lv = self.sp_enc(x_sp)
-        z_sp = GaussianSampleLayer(sp_z_mu, sp_z_lv)
-        x_sp_sp = self.sp_dec(z_sp, y)
+        # normalize input using mean/var
+        x_in_minmax = self.normalizers[self.feat_type]['minmax'].forward_process(x)
+        x_in = tf.expand_dims(x_in_minmax, 1) # insert channel dimension
+        
+        z_mu, z_lv = self.enc(x_in)
+        z = GaussianSampleLayer(z_mu, z_lv)
+        xb = self.dec(z, y)
 
-        kl_loss_sp = kl_loss(sp_z_mu, sp_z_lv)
-        recon_loss_sp = log_loss(x_sp, x_sp_sp)
+        KL_loss = kl_loss(z_mu, z_lv)
+        recon_loss = log_loss(x_in_minmax, xb)
         
 
         loss = dict()
-        loss['D_KL'] = kl_loss_sp
-
-        loss['recon'] = recon_loss_sp 
+        loss['D_KL'] = KL_loss
+        loss['recon'] = recon_loss
 
         loss['all'] = - loss['recon'] + loss['D_KL']
 
-        tf.summary.scalar('KL-div-sp', kl_loss_sp)
-        tf.summary.scalar('reconstruction-sp', recon_loss_sp)
+        tf.summary.scalar('KL-div-sp', KL_loss)
+        tf.summary.scalar('reconstruction-sp', recon_loss)
 
-        tf.summary.histogram('x_sp_sp', x_sp_sp)
-        tf.summary.histogram('x_sp', x_sp)
+        tf.summary.histogram('xb', xb)
+        tf.summary.histogram('x', x)
         return loss
 
-    def validate(self, data):
 
-        x_sp = data['sp']
-        y = data['speaker']
-        y = tf.expand_dims(y, 0)
-        
-        # Use sp as source
-        z_sp, _ = self.sp_enc(x_sp)
-        x_sp_sp = self.sp_dec(z_sp, y)
-        x_sp_mcc = self.mcc_dec(z_sp, y)
-
-        recon_loss_sp = log_loss(x_sp, x_sp_sp)
-        
-        results = dict()
-        results['recon_sp'] = recon_loss_sp 
-
-        results['z_sp'] = z_sp
-        results['x_sp_sp'] = x_sp_sp
-        results['num_files'] = data['num_files']
-        
-        return results
-
-    def get_train_log(self, result):
-        msg = 'Iter {:05d}: '.format(result['step'])
-        msg += 'recon = {:.4} '.format(result['recon'])
-        msg += 'KL = {:.4} '.format(result['D_KL'])
-        return msg
-    
-    def get_valid_log(self, step, result_all):
-        valid_loss_all = [loss['recon'] for loss in result_all]
-        valid_loss_avg = np.mean(np.array(valid_loss_all))
-        msg = 'Validation in Iter {:05d}: '.format(step)
-        msg += 'recon = {:.4} '.format(valid_loss_avg)
+    def get_train_log(self, step, time_window, loss_windows):
+        msg = 'Iter {:05d}: '.format(step)
+        msg += '{:.2} sec/step, '.format(time_window.average)
+        msg += 'recon = {:.4} '.format(loss_windows['recon'].average)
+        msg += 'KL = {:.4} '.format(loss_windows['D_KL'].average)
         return msg
 
-    def fetches(self, loss, valid, opt): 
+    def fetches(self, loss, opt): 
         """ define fetches
             update_fetches: get logging infos
             info_fetches: optimization only
-            valid_fetches: for validation
         """
         update_fetches = opt['opt']
         info_fetches = {
             "D_KL": loss['D_KL'],
             "recon": loss['recon'],
+            "all": loss['all'],
             "opt": opt['opt'],
-            "step": opt['global_step'],
-        }
-        valid_fetches = {
-            "recon": valid['recon_mcc'],
             "step": opt['global_step'],
         }
 
         return {
             'update': update_fetches,
             'info': info_fetches,
-            'valid': valid_fetches,
         }
 
-    def sp_encode(self, x):
-        z_mu, _ = self.sp_enc(x)
-        return z_mu
-
-    def sp_decode(self, z, y):
-        return self.sp_dec(z, y)
-
     def encode(self, x):
-        return self.sp_encode(x)
+        # normalize input using mean/var
+        x_in_minmax = self.normalizers[self.feat_type]['minmax'].forward_process(x) # [n_frames, dim]
+        x_in = tf.expand_dims(tf.expand_dims(x_in_minmax, 0), 0) # [1, 1, n_frames, dim]
+
+        return self.enc(x_in)
 
     def decode(self, z, y):
-        return self.sp_decode(z, y)
+        xh = self.dec(z, y)
+        xh = tf.squeeze(xh, 0)
+        return self.normalizers[self.feat_type]['minmax'].backward_process(xh)

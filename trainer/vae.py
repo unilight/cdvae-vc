@@ -4,6 +4,8 @@ import os
 import numpy as np
 import tensorflow as tf
 from trainer.base import Trainer
+from util.wrapper import ValueWindow
+import time
 
 class VAETrainer(Trainer):
     '''
@@ -35,14 +37,19 @@ class VAETrainer(Trainer):
     def train(self):
 
         # get fetches
-        fetches = self.model.fetches(self.loss, self.valid, self.opt)
+        fetches = self.model.fetches(self.loss, self.opt)
 
+        # init windows
+        time_window = ValueWindow(100)
+        loss_window = ValueWindow(100)
+        
         # get session (defined in initialization)
         sess = self.sess
             
         # restore 
         self.restore()
 
+        start_time = time.time()
         # Iterate through training steps
         while not sess.should_stop():
 
@@ -52,16 +59,13 @@ class VAETrainer(Trainer):
             # Display progress when reached a certain frequency
             if (step+1) % self.arch['training']['log_freq'] == 0:
                 results = sess.run(fetches['info'])
-                msg = self.model.get_train_log(results)
-                self.print_log(msg)
 
-                # validation
-                valid_loss_all = []
-                for _ in range(self.valid['num_files']):
-                    results = sess.run(fetches['valid'])
-                    valid_loss_all.append(results)
-                
-                msg = self.model.get_valid_log(results['step'], valid_loss_all)
+                # update windows
+                elapsed_time = (time.time()-start_time) / step
+                self.update_windows(elapsed_time, results)
+
+                # log 
+                msg = self.model.get_train_log(results['step'], self.time_window, self.loss_windows)
                 self.print_log(msg)
 
             else:

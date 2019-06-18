@@ -1,3 +1,6 @@
+data/vcc2018/wav
+data/vcc2018/bin
+data/vcc2018/stats
 logdir
 __init__.py
 __pycache__

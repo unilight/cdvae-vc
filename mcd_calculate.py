@@ -1,3 +1,9 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+# Calculate MCD using converted features.
+# By Wen-Chin Huang 2019.06
+
 import json
 import os
 
@@ -18,12 +24,10 @@ import sys
 from preprocessing.vcc2018.feature_reader import Whole_feature_reader
 from preprocessing.normalizer import MinMaxScaler
 
-def read_and_synthesize(file_list, arch, MCD, ):
+def read_and_synthesize(file_list, arch, MCD, input_feat, output_feat):
     
     for i, (bin_path, src_feat_path, trg_feat_path) in enumerate(file_list):
-        input_feat = arch['conversion']['input']
         input_feat_dim = arch['feat_param']['dim'][input_feat]
-        output_feat = arch['conversion']['output']
         basename = os.path.splitext(os.path.split(bin_path)[-1])[0]
         
         # read source features , target features and converted mcc
@@ -35,7 +39,7 @@ def read_and_synthesize(file_list, arch, MCD, ):
         if output_feat == 'sp':
             cvt = np.power(10., cvt)
             en_cvt = np.expand_dims(src_data['en_sp'], 1) * cvt
-            mcc_cvt = pysptk.sp2mc(en_cvt, arch['feat_param']['mcc_dim'], arch['feat_param']['mcep_alpha'])[:, 1:]
+            mcc_cvt = pysptk.sp2mc(en_cvt, arch['feat_param']['mcep_dim'], arch['feat_param']['mcep_alpha'])[:, 1:]
         elif output_feat == 'mcc':
             mcc_cvt = cvt
         else:
@@ -56,7 +60,7 @@ def read_and_synthesize(file_list, arch, MCD, ):
 
         # MCD 
         diff2sum = np.sum((cvt_mcc_dtw - trg_mcc_dtw)**2, 1)
-        mcd = np.mean(10.0 / np.log(10.0) * np.sqrt(2 * diff2sum))
+        mcd = np.mean(10.0 / np.log(10.0) * np.sqrt(2 * diff2sum), 0)
         logging.info('{} {}'.format(basename, mcd))
         MCD.append(mcd)
 
@@ -67,6 +71,15 @@ def main():
     parser.add_argument(
         "--logdir", required=True, type=str,
         help="path of log directory")
+    parser.add_argument(
+        "--type", default='test', type=str,
+        help="test or valid (default is test)")
+    parser.add_argument(
+        "--input_feat", required=True, 
+        type=str, help="input feature type")
+    parser.add_argument(
+        "--output_feat", required=True, 
+        type=str, help="output feature type")
     parser.add_argument(
         "--n_jobs", default=12,
         type=int, help="number of parallel jobs")
@@ -89,8 +102,8 @@ def main():
     logging.info('MCD calculation')
     logging.info(args)
     
-    train_dir = os.sep.join(args.logdir.split(os.sep)[:-2])
-    output_dir = args.logdir.split(os.sep)[-2]
+    train_dir = os.sep.join(os.path.normpath(args.logdir).split(os.sep)[:-1])
+    output_dir = os.path.basename(os.path.normpath(args.logdir))
     src, trg = output_dir.split('-')[-2:]
     
     # Load architecture
@@ -98,12 +111,24 @@ def main():
     with open(arch) as fp:
         arch = json.load(fp)
     
-    output_feat = arch['conversion']['output']
+    input_feat = args.input_feat
+    input_feat_dim = arch['feat_param']['dim'][input_feat]
+    output_feat = args.output_feat
     
     # Get and divide list
     bin_list = sorted(tf.gfile.Glob(os.path.join(args.logdir, 'converted-{}'.format(output_feat), '*.bin')))
-    src_feat_list = sorted(tf.gfile.Glob(arch['conversion']['test_file_pattern'].format(src)))
-    trg_feat_list = sorted(tf.gfile.Glob(arch['conversion']['test_file_pattern'].format(trg)))
+    if args.type == 'test':
+        src_feat_list = sorted(tf.gfile.Glob(arch['conversion']['test_file_pattern'].format(src)))
+        trg_feat_list = sorted(tf.gfile.Glob(arch['conversion']['test_file_pattern'].format(trg)))
+    elif args.type == 'valid':
+        src_feat_list = []
+        trg_feat_list = []
+        for p in arch['training']['valid_file_pattern']:
+            src_feat_list.extend(tf.gfile.Glob(p.replace('*', src)))
+            trg_feat_list.extend(tf.gfile.Glob(p.replace('*', trg)))
+        src_feat_list = sorted(src_feat_list)
+        trg_feat_list = sorted(trg_feat_list)
+
     assert(len(bin_list) == len(src_feat_list))
     file_list = list(zip(bin_list, src_feat_list, trg_feat_list))
     logging.info("number of utterances = %d" % len(file_list))
@@ -115,7 +140,7 @@ def main():
         MCD = manager.list()
         processes = []
         for f in file_lists:
-            p = mp.Process(target=read_and_synthesize, args=(f, arch, MCD,))
+            p = mp.Process(target=read_and_synthesize, args=(f, arch, MCD, input_feat, output_feat))
             p.start()
             processes.append(p)
 

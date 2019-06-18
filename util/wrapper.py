@@ -42,9 +42,9 @@ def load(saver, sess, logdir, ckpt=None):
             print('No checkpoint found')
             return None
 
-def get_default_logdir_train(logdir_root='logdir'):
+def get_default_logdir_train(note, logdir_root='logdir'):
     STARTED_DATESTRING = datetime.now().strftime('%0m%0d-%0H%0M-%0S-%Y')
-    logdir = os.path.join(logdir_root, STARTED_DATESTRING)
+    logdir = os.path.join(logdir_root, '{}-{}'.format(STARTED_DATESTRING, note))
     print('Using default logdir: {}'.format(logdir))        
     return logdir
 
@@ -53,3 +53,26 @@ def get_default_logdir_output(args):
     logdir = os.path.join(args.logdir, STARTED_DATESTRING+'-{}-{}'.format(args.src, args.trg))
     print('Logdir: {}'.format(logdir))        
     return logdir
+
+class ValueWindow():
+    def __init__(self, window_size=100):
+        self._window_size = window_size
+        self._values = []
+
+    def append(self, x):
+        self._values = self._values[-(self._window_size - 1):] + [x]
+
+    @property
+    def sum(self):
+        return sum(self._values)
+
+    @property
+    def count(self):
+        return len(self._values)
+
+    @property
+    def average(self):
+        return self.sum / max(1, self.count)
+
+    def reset(self):
+        self._values = []

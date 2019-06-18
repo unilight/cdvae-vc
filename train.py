@@ -1,3 +1,10 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+# Train a VC model.
+# By Wen-Chin Huang 2019.06
+
+
 import os
 import json
 
@@ -11,23 +18,29 @@ import argparse
 import logging
 
 import sys
-from preprocessing.vcc2018.feature_reader import Frame_feature_reader, Whole_feature_reader_tf
+from preprocessing.vcc2018.feature_reader import  Segment_feature_reader
 from preprocessing.normalizer import MinMaxScaler
 from preprocessing.utils import read_hdf5
 
 def main():
     
     parser = argparse.ArgumentParser(
-        description="train the model.")
+        description="Train the model.")
     parser.add_argument(
-        "--architecture", default='architectures/architecture-vae-ugan.json', type=str,
+        "--architecture", required=True, type=str,
         help="network architecture")
+    parser.add_argument(
+        "--note", required=True, type=str,
+        help="note on experiemnt")
     parser.add_argument(
         "--logdir", default=None, type=str,
         help="path of log directory")
     parser.add_argument(
         "--checkpoint", default=None, type=str,
         help="path of checkpoint")
+    parser.add_argument(
+        "--seed", default=12,
+        type=int, help="initialization seed")
     args = parser.parse_args()
 
     #################################################################################
@@ -40,7 +53,7 @@ def main():
         if args.logdir:
             logdir = args.logdir
         else:
-            logdir = get_default_logdir_train()
+            logdir = get_default_logdir_train(args.note)
             tf.gfile.MakeDirs(logdir)
 
     
@@ -67,36 +80,37 @@ def main():
     TRAINER = getattr(module, arch['trainer'])
     
     # Load training data
-    train_data = Frame_feature_reader(
+    train_data = Segment_feature_reader(
         file_pattern = arch['training']['train_file_pattern'],
         feat_param = arch['feat_param'],
         batch_size = arch['training']['batch_size'],
-    )
-    valid_data = Whole_feature_reader_tf(
-        file_pattern = arch['training']['valid_file_pattern'],
-        feat_param = arch['feat_param'],
-        num_epochs=None
+        crop_length = arch['training']['crop_length'],
     )
 
     # Load statistics, normalize and NCHW
     normalizers = {}
-    for k in arch['normalizer_files']:
-        if (arch['normalizer_files'][k]['max'] is not None
-            and arch['normalizer_files'][k]['max'] is not None):
-            normalizer = MinMaxScaler(
-                xmax=np.fromfile(os.path.join(arch['stat_dir'], arch['normalizer_files'][k]['max'])),
-                xmin=np.fromfile(os.path.join(arch['stat_dir'], arch['normalizer_files'][k]['min'])),
-            )
-            normalizers[k] = normalizer
-            for data in [train_data, valid_data]:
-                data[k] = normalizer.forward_process(data[k])
+    for k in arch['normalizer']:
+        normalizers[k] = {}
+        for norm_type in arch['normalizer'][k]['type']:
+            if norm_type == 'minmax':
+                normalizer = MinMaxScaler(
+                    xmax=read_hdf5(arch['stats'], '/max/' + k),
+                    xmin=read_hdf5(arch['stats'], '/min/' + k),
+                )
+            elif norm_type == 'meanvar':
+                normalizer = StandardScaler(
+                    mu=read_hdf5(arch['stats'], '/mean/' + k),
+                    std=read_hdf5(arch['stats'], '/scale/' + k),
+                )
 
-        for data in [train_data, valid_data]:
-            data[k] = tf.expand_dims(tf.expand_dims(data[k], 1), -1)
-    
+            normalizers[k][norm_type] = normalizer
+
+    # set random seed
+    tf.set_random_seed(args.seed)
+
     # Load model and trainer
-    model = MODEL(arch)
-    trainer = TRAINER(model, train_data, valid_data, arch, args, logdir, ckpt)
+    model = MODEL(arch, normalizers = normalizers)
+    trainer = TRAINER(model, train_data, arch, args, logdir, ckpt)
     
     # Train the model
     trainer.train()
