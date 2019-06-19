@@ -112,26 +112,25 @@ class VAE(object):
         # normalize input using mean/var
         x_in_minmax = self.normalizers[self.feat_type]['minmax'].forward_process(x)
         x_in = tf.expand_dims(x_in_minmax, 1) # insert channel dimension
-        
+       
+        # forward pass
         z_mu, z_lv = self.enc(x_in)
         z = GaussianSampleLayer(z_mu, z_lv)
         xb = self.dec(z, y)
 
+        # loss
         KL_loss = kl_loss(z_mu, z_lv)
         recon_loss = log_loss(x_in_minmax, xb)
         
-
         loss = dict()
         loss['D_KL'] = KL_loss
         loss['recon'] = recon_loss
 
         loss['all'] = - loss['recon'] + loss['D_KL']
 
+        # summary
         tf.summary.scalar('KL-div-sp', KL_loss)
         tf.summary.scalar('reconstruction-sp', recon_loss)
-
-        tf.summary.histogram('xb', xb)
-        tf.summary.histogram('x', x)
         return loss
 
 
@@ -161,14 +160,24 @@ class VAE(object):
             'info': info_fetches,
         }
 
-    def encode(self, x):
+    def encode(self, x, feat_type):
+        # sanity check
+        if not feat_type == self.feat_type:
+            print('feature type does not match!')
+            raise NotImplementedError
+
         # normalize input using mean/var
         x_in_minmax = self.normalizers[self.feat_type]['minmax'].forward_process(x) # [n_frames, dim]
         x_in = tf.expand_dims(tf.expand_dims(x_in_minmax, 0), 0) # [1, 1, n_frames, dim]
 
         return self.enc(x_in)
 
-    def decode(self, z, y):
+    def decode(self, z, y, feat_type):
+        # sanity check
+        if not feat_type == self.feat_type:
+            print('feature type does not match!')
+            raise NotImplementedError
+        
         xh = self.dec(z, y)
         xh = tf.squeeze(xh, 0)
         return self.normalizers[self.feat_type]['minmax'].backward_process(xh)

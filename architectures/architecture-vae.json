@@ -25,7 +25,6 @@
         }
     },
 	"training": {
-        "feat_type": "sp",
         "train_file_pattern": ["./data/vcc2018/bin/VAD/*/[12]00[0-6]?.bin",
                                "./data/vcc2018/bin/VAD/*/[12]0070.bin"],
         "valid_file_pattern": ["./data/vcc2018/bin/VAD/*/[12]007[1-9].bin",
@@ -41,7 +40,7 @@
         "log_freq": 1000
 	},
     "conversion": {
-        "test_file_pattern": "./data/vcc2018/bin/no_VAD/{}/3*.bin"
+        "test_file_pattern": "./data/vcc2018/bin/noVAD/{}/3*.bin"
     },
     "feat_param":{
         "fs": 22050,

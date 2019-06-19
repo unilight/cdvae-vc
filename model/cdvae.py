@@ -4,15 +4,17 @@ from util.layers import (GaussianKLD, GaussianLogDensity, GaussianSampleLayer,
                          Layernorm, conv2d_nchw_layernorm, lrelu,
                          kl_loss, log_loss)
 import numpy as np
+from util.wrapper import ValueWindow
 
 class CDVAE(object):
-    def __init__(self, arch):
+    def __init__(self, arch, normalizers=None):
         '''
         Cross Domain Variational Auto Encoder (CDVAE)
         Arguments:
             `arch`: network architecture (`dict`)
         '''
         self.arch = arch
+        self.normalizers = normalizers
 
         with tf.name_scope('SpeakerCode'):
             self.y_emb = self._l2_regularized_embedding(
@@ -36,19 +38,6 @@ class CDVAE(object):
             'MCC_Decoder',
             self.mcc_decoder)
 
-    def _merge(self, var_list, fan_out, l2_reg=1e-6):
-        x = 0.
-        with slim.arg_scope(
-            [slim.fully_connected],
-            num_outputs=fan_out,
-            weights_regularizer=slim.l2_regularizer(l2_reg),
-            normalizer_fn=None,
-            activation_fn=None):
-            for var in var_list:
-                x = x + slim.fully_connected(var)
-        return slim.bias_add(x)
-
-
     def _l2_regularized_embedding(self, n_class, h_dim, scope_name, var_name='y_emb'):
         with tf.variable_scope(scope_name):
             embeddings = tf.get_variable(
@@ -66,6 +55,8 @@ class CDVAE(object):
         return self._encoder(x, net)
 
     def _encoder(self, x, net):
+        x = tf.transpose(x, perm=[0, 3, 2, 1]) # [N, d, n_frames, 1]
+        
         for i, (o, k, s) in enumerate(zip(net['output'], net['kernel'], net['stride'])):
             x = conv2d_nchw_layernorm(
                 x, o, k, s, lrelu,
@@ -118,14 +109,15 @@ class CDVAE(object):
                     # GLU
                     with tf.variable_scope('GLU'):
                         x = tf.sigmoid(x_sigmoid) * tf.tanh(x_tanh)
-                        # x = tf.sigmoid(x_sigmoid) * x_tanh
                 else:
                     x = tf.layers.conv2d_transpose(x, o, k, s,
                         padding='same',
                         data_format='channels_first',
                     )
 
-        return x # [N, feat_dim, n_frames, 1]
+        x = tf.squeeze(x, axis=[-1]) # [N, C, n_frames]
+        x = tf.transpose(x, perm=[0, 2, 1]) # [N, n_frames, C]
+        return x
 
     def loss(self, data):
 
@@ -133,27 +125,34 @@ class CDVAE(object):
         x_mcc = data['mcc']
         y = data['speaker']
         
+        # normalize input using mean/var
+        x_sp_in_minmax = self.normalizers['sp']['minmax'].forward_process(x_sp)
+        x_sp_in = tf.expand_dims(x_sp_in_minmax, 1) # insert channel dimension
+        x_mcc_in_minmax = self.normalizers['mcc']['minmax'].forward_process(x_mcc)
+        x_mcc_in = tf.expand_dims(x_mcc_in_minmax, 1) # insert channel dimension
+       
+        # forward pass
         # Use sp as source
-        sp_z_mu, sp_z_lv = self.sp_enc(x_sp)
+        sp_z_mu, sp_z_lv = self.sp_enc(x_sp_in)
         z_sp = GaussianSampleLayer(sp_z_mu, sp_z_lv)
         x_sp_sp = self.sp_dec(z_sp, y)
         x_sp_mcc = self.mcc_dec(z_sp, y)
 
         kl_loss_sp = kl_loss(sp_z_mu, sp_z_lv)
-        recon_loss_sp = log_loss(x_sp, x_sp_sp)
-        cross_loss_sp2mcc = log_loss(x_mcc, x_sp_mcc)
+        recon_loss_sp = log_loss(x_sp_in, x_sp_sp)
+        cross_loss_sp2mcc = log_loss(x_mcc_in, x_sp_mcc)
        
         # Use mcc as source
-        mcc_z_mu, mcc_z_lv = self.mcc_enc(x_mcc)
+        mcc_z_mu, mcc_z_lv = self.mcc_enc(x_mcc_in)
         z_mcc = GaussianSampleLayer(mcc_z_mu, mcc_z_lv)
         x_mcc_sp = self.sp_dec(z_mcc, y)
         x_mcc_mcc = self.mcc_dec(z_mcc, y)
 
+        # loss
         kl_loss_mcc = kl_loss(mcc_z_mu, mcc_z_lv)
-        recon_loss_mcc = log_loss(x_mcc, x_mcc_mcc)
-        cross_loss_mcc2sp = log_loss(x_sp, x_mcc_sp)
+        recon_loss_mcc = log_loss(x_mcc_in, x_mcc_mcc)
+        cross_loss_mcc2sp = log_loss(x_sp_in, x_mcc_sp)
         
-        # latent loss
         latent_loss = tf.reduce_mean(tf.abs(sp_z_mu - mcc_z_mu))
 
         loss = dict()
@@ -170,6 +169,7 @@ class CDVAE(object):
 
         loss['all'] = - loss['recon'] - loss['cross'] + loss['D_KL'] + loss['latent']
 
+        # summary
         tf.summary.scalar('KL-div-sp', kl_loss_sp)
         tf.summary.scalar('KL-div-mcc', kl_loss_mcc)
         tf.summary.scalar('reconstruction-sp', recon_loss_sp)
@@ -177,70 +177,21 @@ class CDVAE(object):
         tf.summary.scalar('cross-sp2mcc', cross_loss_sp2mcc)
         tf.summary.scalar('cross-mcc2sp', cross_loss_mcc2sp)
         tf.summary.scalar('latent', latent_loss)
-
-        tf.summary.histogram('x_sp_sp', x_sp_sp)
-        tf.summary.histogram('x_mcc_mcc', x_mcc_mcc)
-        tf.summary.histogram('x_sp', x_sp)
-        tf.summary.histogram('x_mcc', x_mcc)
         return loss
 
-    def validate(self, data):
-
-        x_sp = data['sp']
-        x_mcc = data['mcc']
-        y = data['speaker']
-        y = tf.expand_dims(y, 0)
-        
-        # Use sp as source
-        z_sp, _ = self.sp_enc(x_sp)
-        x_sp_sp = self.sp_dec(z_sp, y)
-        x_sp_mcc = self.mcc_dec(z_sp, y)
-
-        recon_loss_sp = log_loss(x_sp, x_sp_sp)
-       
-        # Use mcc as source
-        z_mcc, _ = self.mcc_enc(x_mcc)
-        x_mcc_sp = self.sp_dec(z_mcc, y)
-        x_mcc_mcc = self.mcc_dec(z_mcc, y) # [N, 34, n_frames, 1]
-
-        recon_loss_mcc = log_loss(x_mcc, x_mcc_mcc)
-
-        # MCD
-        
-        results = dict()
-        results['recon_sp'] = recon_loss_sp 
-        results['recon_mcc'] = recon_loss_mcc
-
-        results['z_sp'] = z_sp
-        results['z_mcc'] = z_mcc
-        results['x_mcc_mcc'] = x_mcc_mcc
-        results['x_mcc_sp'] = x_mcc_sp
-        results['x_sp_mcc'] = x_sp_mcc
-        results['x_sp_sp'] = x_sp_sp
-        results['num_files'] = data['num_files']
-        
-        return results
-
-    def get_train_log(self, result):
-        msg = 'Iter {:05d}: '.format(result['step'])
-        msg += 'recon = {:.4} '.format(result['recon'])
-        msg += 'cross = {:.4} '.format(result['cross'])
-        msg += 'KL = {:.4} '.format(result['D_KL'])
-        msg += 'latent = {:.5} '.format(result['latent'])
+    def get_train_log(self, step, time_window, loss_windows):
+        msg = 'Iter {:05d}: '.format(step)
+        msg += '{:.2} sec/step, '.format(time_window.average)
+        msg += 'recon = {:.4} '.format(loss_windows['recon'].average)
+        msg += 'cross = {:.4} '.format(loss_windows['cross'].average)
+        msg += 'KL = {:.4} '.format(loss_windows['D_KL'].average)
+        msg += 'latent = {:.5} '.format(loss_windows['latent'].average)
         return msg
     
-    def get_valid_log(self, step, result_all):
-        valid_loss_all = [loss['recon'] for loss in result_all]
-        valid_loss_avg = np.mean(np.array(valid_loss_all))
-        msg = 'Validation in Iter {:05d}: '.format(step)
-        msg += 'recon = {:.4} '.format(valid_loss_avg)
-        return msg
-
-    def fetches(self, loss, valid, opt): 
+    def fetches(self, loss, opt): 
         """ define fetches
             update_fetches: get logging infos
             info_fetches: optimization only
-            valid_fetches: for validation
         """
         update_fetches = opt['opt']
         info_fetches = {
@@ -248,36 +199,41 @@ class CDVAE(object):
             "recon": loss['recon'],
             "cross": loss['cross'],
             "latent": loss['latent'],
+            "all": loss['all'],
             "opt": opt['opt'],
-            "step": opt['global_step'],
-        }
-        valid_fetches = {
-            "recon": valid['recon_mcc'],
             "step": opt['global_step'],
         }
 
         return {
             'update': update_fetches,
             'info': info_fetches,
-            'valid': valid_fetches,
         }
 
-    def sp_encode(self, x):
-        z_mu, _ = self.sp_enc(x)
-        return z_mu
+    def encode(self, x, feat_type):
+        # sanity check
+        if not feat_type in ['sp', 'mcc']:
+            print('feature type does not match!')
+            raise NotImplementedError
 
-    def sp_decode(self, z, y):
-        return self.sp_dec(z, y)
-    
-    def mcc_encode(self, x):
-        z_mu, _ = self.mcc_enc(x)
-        return z_mu
+        # normalize input using mean/var
+        x_in_minmax = self.normalizers[feat_type]['minmax'].forward_process(x) # [n_frames, dim]
+        x_in = tf.expand_dims(tf.expand_dims(x_in_minmax, 0), 0) # [1, 1, n_frames, dim]
 
-    def mcc_decode(self, z, y):
-        return self.mcc_dec(z, y)
+        if feat_type == 'sp':
+            return self.sp_enc(x_in)
+        elif feat_type == 'mcc':
+            return self.mcc_enc(x_in)
 
-    def encode(self, x):
-        return self.mcc_encode(x)
-
-    def decode(self, z, y):
-        return self.mcc_decode(z, y)
+    def decode(self, z, y, feat_type):
+        # sanity check
+        if not feat_type in ['sp', 'mcc']:
+            print('feature type does not match!')
+            raise NotImplementedError
+        
+        if feat_type == 'sp':
+            xh = self.sp_dec(z, y)
+        elif feat_type == 'mcc':
+            xh = self.mcc_dec(z, y)
+        
+        xh = tf.squeeze(xh, 0)
+        return self.normalizers[feat_type]['minmax'].backward_process(xh)

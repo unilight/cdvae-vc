@@ -121,8 +121,8 @@ def main():
     
     # Define model
     model = MODEL(arch, normalizers)
-    z, _ = model.encode(x_pl)
-    xh = model.decode(z, yh)
+    z, _ = model.encode(x_pl, input_feat)
+    xh = model.decode(z, yh, output_feat)
     
     # make directories for output
     tf.gfile.MakeDirs(os.path.join(output_dir, 'latent'))
