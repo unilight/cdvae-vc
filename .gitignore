@@ -4,3 +4,4 @@ data/vcc2018/stats
 logdir
 __init__.py
 __pycache__
+run.sh

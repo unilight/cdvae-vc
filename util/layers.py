@@ -122,10 +122,13 @@ def log_loss(x, xh):
 
 def gradient_penalty_loss(x, xh, discriminator):
     batch_size, _, _, _ = x.get_shape().as_list()
+        
+    # expand dims because the output of the network  is squeezed. TODO: fix this by not squeezing decoder outputs?
+    xh_NCHW = tf.expand_dims(xh, axis=1)
 
     alpha_dist = tf.contrib.distributions.Uniform(low=0., high=1.)
     alpha = alpha_dist.sample((batch_size, 1, 1, 1))
-    interpolated = x + alpha * (xh - x)
+    interpolated = x + alpha * (xh_NCHW - x)
     inte_logit = discriminator(interpolated)
     gradients = tf.gradients(inte_logit, [interpolated,])[0]
     grad_l2 = tf.sqrt(tf.reduce_sum(tf.square(gradients), axis=[1,2,3]))

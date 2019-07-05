@@ -138,10 +138,6 @@ class CDVAE(object):
         x_sp_sp = self.sp_dec(z_sp, y)
         x_sp_mcc = self.mcc_dec(z_sp, y)
 
-        kl_loss_sp = kl_loss(sp_z_mu, sp_z_lv)
-        recon_loss_sp = log_loss(x_sp_in, x_sp_sp)
-        cross_loss_sp2mcc = log_loss(x_mcc_in, x_sp_mcc)
-       
         # Use mcc as source
         mcc_z_mu, mcc_z_lv = self.mcc_enc(x_mcc_in)
         z_mcc = GaussianSampleLayer(mcc_z_mu, mcc_z_lv)
@@ -149,10 +145,12 @@ class CDVAE(object):
         x_mcc_mcc = self.mcc_dec(z_mcc, y)
 
         # loss
+        kl_loss_sp = kl_loss(sp_z_mu, sp_z_lv)
+        recon_loss_sp = log_loss(x_sp_in, x_sp_sp)
+        cross_loss_sp2mcc = log_loss(x_mcc_in, x_sp_mcc)
         kl_loss_mcc = kl_loss(mcc_z_mu, mcc_z_lv)
         recon_loss_mcc = log_loss(x_mcc_in, x_mcc_mcc)
         cross_loss_mcc2sp = log_loss(x_sp_in, x_mcc_sp)
-        
         latent_loss = tf.reduce_mean(tf.abs(sp_z_mu - mcc_z_mu))
 
         loss = dict()

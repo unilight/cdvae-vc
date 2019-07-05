@@ -34,10 +34,14 @@ class Trainer(object):
                         )
 
         # init windows for time and each losses
+        self.reset_time_windows()
+
+    def reset_time_windows(self):
         self.time_window = ValueWindow(100)
         self.loss_windows = {}
         for k, v in self.loss.items():
             self.loss_windows[k] = ValueWindow(100)
+        return
 
 
     def _optimize(self):

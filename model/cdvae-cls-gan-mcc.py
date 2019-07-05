@@ -4,16 +4,19 @@ from util.layers import (GaussianKLD, GaussianLogDensity, GaussianSampleLayer,
                          Layernorm, conv2d_nchw_layernorm, lrelu,
                          kl_loss, log_loss, gradient_penalty_loss)
 import numpy as np
+from util.wrapper import ValueWindow
 
-class CDVAEUGAN(object):
-    def __init__(self, arch):
+class CDVAECLSGAN(object):
+    def __init__(self, arch, normalizers=None):
         '''
         Cross Domain Variational Auto Encoding
-        Generative Adversarial Net (CDVAE-GAN)
+        Generative Adversarial Net with Adversarial classifier
+        (CDVAE-CLS-GAN)
         Arguments:
             `arch`: network architecture (`dict`)
         '''
         self.arch = arch
+        self.normalizers = normalizers
 
         with tf.name_scope('SpeakerCode'):
             self.y_emb = self._l2_regularized_embedding(
@@ -45,19 +48,6 @@ class CDVAEUGAN(object):
             'Latent_Classifier',
             self.latent_classifier)
 
-    def _merge(self, var_list, fan_out, l2_reg=1e-6):
-        x = 0.
-        with slim.arg_scope(
-            [slim.fully_connected],
-            num_outputs=fan_out,
-            weights_regularizer=slim.l2_regularizer(l2_reg),
-            normalizer_fn=None,
-            activation_fn=None):
-            for var in var_list:
-                x = x + slim.fully_connected(var)
-        return slim.bias_add(x)
-
-
     def _l2_regularized_embedding(self, n_class, h_dim, scope_name, var_name='y_emb'):
         with tf.variable_scope(scope_name):
             embeddings = tf.get_variable(
@@ -75,6 +65,7 @@ class CDVAEUGAN(object):
         return self._encoder(x, net)
 
     def _encoder(self, x, net):
+        x = tf.transpose(x, perm=[0, 3, 2, 1]) # [N, d, n_frames, 1]
         for i, (o, k, s) in enumerate(zip(net['output'], net['kernel'], net['stride'])):
             x = conv2d_nchw_layernorm(
                 x, o, k, s, lrelu,
@@ -133,17 +124,17 @@ class CDVAEUGAN(object):
                         data_format='channels_first',
                     )
 
-        return x  # [N, feat_dim, n_frames, 1]
-
-    def sp_discriminator(self, x):
-        net = self.arch['discriminator']['sp']
-        return self._discriminator(x, net)
+        x = tf.squeeze(x, axis=[-1]) # [N, C, n_frames]
+        x = tf.transpose(x, perm=[0, 2, 1]) # [N, n_frames, C]
+        return x
 
     def mcc_discriminator(self, x):
         net = self.arch['discriminator']['mcc']
         return self._discriminator(x, net)
 
     def _discriminator(self, x, net):
+        x = tf.transpose(x, perm=[0, 3, 2, 1]) # [N, d, n_frames, 1]
+        
         for i, (o, k, s) in enumerate(zip(net['output'], net['kernel'], net['stride'])):
             x = conv2d_nchw_layernorm(
                 x, o, k, s, lrelu,
@@ -159,10 +150,7 @@ class CDVAEUGAN(object):
 
     def latent_classifier(self, z):
         net = self.arch['classifier']['latent']
-        return self._classifier(z, net)
-
-    def _classifier(self, z, net):
-
+        
         x = tf.transpose(z, [0, 2, 1]) # [N, z_dim, n_frames]
         x = tf.expand_dims(x, -1) # [N, z_dim, n_frames, 1]
         
@@ -196,57 +184,56 @@ class CDVAEUGAN(object):
 
         x_sp = data['sp']
         x_mcc = data['mcc']
-        y = data['speaker'] # [N, n_frames]
+        y = data['speaker']
+        label = tf.one_hot(tf.reduce_mean(y, axis=1, keep_dims=True), self.arch['y_dim'])
         
+        # normalize input using mean/var
+        x_sp_in_minmax = self.normalizers['sp']['minmax'].forward_process(x_sp)
+        x_sp_in = tf.expand_dims(x_sp_in_minmax, 1) # insert channel dimension
+        x_mcc_in_minmax = self.normalizers['mcc']['minmax'].forward_process(x_mcc)
+        x_mcc_in = tf.expand_dims(x_mcc_in_minmax, 1) # insert channel dimension
+       
+        # forward pass
         # Use sp as source
-        sp_z_mu, sp_z_lv = self.sp_enc(x_sp)
+        sp_z_mu, sp_z_lv = self.sp_enc(x_sp_in)
         z_sp = GaussianSampleLayer(sp_z_mu, sp_z_lv)
         x_sp_sp = self.sp_dec(z_sp, y)
         x_sp_mcc = self.mcc_dec(z_sp, y)
 
-        kl_loss_sp = kl_loss(sp_z_mu, sp_z_lv)
-        recon_loss_sp = log_loss(x_sp, x_sp_sp)
-        cross_loss_sp2mcc = log_loss(x_mcc, x_sp_mcc)
-        '''
-        real_sp_logit = self.sp_dis(x_sp)
-        fake_sp_logit = self.sp_dis(x_sp_sp)
-
-        gradient_penalty_sp = gradient_penalty_loss(x_sp, x_sp_sp, self.sp_dis) 
-        '''
+        cls_sp_logit = self.latent_cls(sp_z_mu)
+        z_sp_pred = tf.nn.softmax(cls_sp_logit)
+        sp_corr_pred = tf.equal(tf.argmax(z_sp_pred, 1), tf.reduce_mean(y, axis=1))
 
         # Use mcc as source
-        mcc_z_mu, mcc_z_lv = self.mcc_enc(x_mcc)
+        mcc_z_mu, mcc_z_lv = self.mcc_enc(x_mcc_in)
         z_mcc = GaussianSampleLayer(mcc_z_mu, mcc_z_lv)
         x_mcc_sp = self.sp_dec(z_mcc, y)
         x_mcc_mcc = self.mcc_dec(z_mcc, y)
+        
+        x_mcc_mcc_NCHW = tf.expand_dims(x_mcc_mcc, axis=1)
+        real_mcc_logit = self.mcc_dis(x_mcc_in)
+        fake_mcc_logit = self.mcc_dis(x_mcc_mcc_NCHW)
+        cls_mcc_logit = self.latent_cls(mcc_z_mu)
+        z_mcc_pred = tf.nn.softmax(cls_mcc_logit)
+        mcc_corr_pred = tf.equal(tf.argmax(z_mcc_pred, 1), tf.reduce_mean(y, axis=1))
 
+        # loss
+        kl_loss_sp = kl_loss(sp_z_mu, sp_z_lv)
+        recon_loss_sp = log_loss(x_sp_in, x_sp_sp)
+        cross_loss_sp2mcc = log_loss(x_mcc_in, x_sp_mcc)
         kl_loss_mcc = kl_loss(mcc_z_mu, mcc_z_lv)
-        recon_loss_mcc = log_loss(x_mcc, x_mcc_mcc)
-        cross_loss_mcc2sp = log_loss(x_sp, x_mcc_sp)
-
-        real_mcc_logit = self.mcc_dis(x_mcc)
-        fake_mcc_logit = self.mcc_dis(x_mcc_mcc)
-
-        gradient_penalty_mcc = gradient_penalty_loss(x_mcc, x_mcc_mcc, self.mcc_dis)
-
-        # latent loss
+        recon_loss_mcc = log_loss(x_mcc_in, x_mcc_mcc_NCHW)
+        cross_loss_mcc2sp = log_loss(x_sp_in, x_mcc_sp)
         latent_loss = tf.reduce_mean(tf.abs(sp_z_mu - mcc_z_mu))
 
-        # classification
-        label = tf.one_hot(tf.reduce_mean(y, axis=1, keep_dims=True), self.arch['y_dim'])
-        cls_sp_logit = self.latent_cls(sp_z_mu)
-        cls_mcc_logit = self.latent_cls(mcc_z_mu)
+        gradient_penalty_mcc = gradient_penalty_loss(x_mcc_in, x_mcc_mcc, self.mcc_dis)
         cls_loss_sp = \
-            tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(
+            tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
                 labels=tf.stop_gradient(label), logits=cls_sp_logit))
         cls_loss_mcc = \
-            tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(
+            tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
                 labels=tf.stop_gradient(label), logits=cls_mcc_logit))
         
-        z_sp_pred = tf.nn.softmax(cls_sp_logit)
-        z_mcc_pred = tf.nn.softmax(cls_mcc_logit)
-        sp_corr_pred = tf.equal(tf.argmax(z_sp_pred, 1), tf.reduce_mean(y, axis=1))
-        mcc_corr_pred = tf.equal(tf.argmax(z_mcc_pred, 1), tf.reduce_mean(y, axis=1))
         acc = 0.5 * (tf.reduce_mean(tf.cast(sp_corr_pred, tf.float32)) + tf.reduce_mean(tf.cast(mcc_corr_pred, tf.float32)))
 
         loss = dict()
@@ -261,7 +248,6 @@ class CDVAEUGAN(object):
         loss['wgan_gp_mcc'] = gradient_penalty_mcc
         loss['cls_loss_sp'] = cls_loss_sp
         loss['cls_loss_mcc'] = cls_loss_mcc
-        loss['acc'] = acc
 
         with tf.name_scope('Summary'):
             tf.summary.scalar('KL-div-sp', kl_loss_sp)
@@ -276,59 +262,32 @@ class CDVAEUGAN(object):
             tf.summary.scalar('cls-sp', cls_loss_sp)
             tf.summary.scalar('cls-mcc', cls_loss_mcc)
             tf.summary.scalar('cls-accuracy', acc)
-            '''
-            tf.summary.histogram('x_sp_sp', x_sp_sp)
-            tf.summary.histogram('x_mcc_mcc', x_mcc_mcc)
-            tf.summary.histogram('x_sp', x_sp)
-            tf.summary.histogram('x_mcc', x_mcc)
-            '''
+        
         return loss
 
-    def validate(self, data):
-
-        x_sp = data['sp']
-        y = data['speaker']
-        y = tf.expand_dims(y, 0)
-        
-        # Use sp as source
-        z_sp, _ = self.sp_enc(x_sp)
-        x_sp_sp = self.sp_dec(z_sp, y)
-
-        recon_loss_sp = log_loss(x_sp, x_sp_sp)
-
-        
-        results = dict()
-        results['recon_sp'] = recon_loss_sp 
-
-        results['z_sp'] = z_sp
-        results['x_sp_sp'] = x_sp_sp
-        results['num_files'] = data['num_files']
-        
-        return results
-
-    def get_train_log(self, result):
-        msg = 'Iter {:05d}: '.format(result['step'])
-        msg += 'recon = {:.4} '.format(result['recon_sp']+result['recon_mcc'])
-        msg += 'cross = {:.4} '.format(result['cross_sp2mcc']+result['cross_mcc2sp'])
-        msg += 'KL = {:.4} '.format(result['D_KL_sp']+result['D_KL_mcc'])
-        msg += 'latent = {:.5} '.format(result['latent'])
-        msg += 'W = {:.3} '.format(result['Dis'])
+    def get_train_log(self, step, time_window, loss_windows):
+        msg = 'Iter {:05d}: '.format(step)
+        msg += '{:.2} sec/step, '.format(time_window.average)
+        msg += 'recon = {:.4} '.format(loss_windows['recon_sp'].average+loss_windows['recon_mcc'].average)
+        msg += 'cross = {:.4} '.format(loss_windows['cross_sp2mcc'].average+loss_windows['cross_mcc2sp'].average)
+        msg += 'KL = {:.4} '.format(loss_windows['D_KL_sp'].average+loss_windows['D_KL_mcc'].average)
+        msg += 'latent = {:.5} '.format(loss_windows['latent'].average)
+        msg += 'W = {:.3} '.format(loss_windows['wgan_mcc'].average+loss_windows['wgan_gp_mcc'].average)
         return msg
     
-    def get_valid_log(self, step, result_all):
-        valid_loss_all = [loss['recon'] for loss in result_all]
-        valid_loss_avg = np.mean(np.array(valid_loss_all))
-        msg = 'Validation in Iter {:05d}: '.format(step)
-        msg += 'recon = {:.4} '.format(valid_loss_avg)
-        return msg
 
-    def fetches(self, loss, valid, opt): 
+    def fetches(self, loss, opt): 
         """ define fetches
             update_fetches: get logging infos
             info_fetches: optimization only
-            valid_fetches: for validation
         """
-        vae_fetches = {
+        vae_fetches_step_update = {
+            'sp_decoder': opt['opt_sp_g_step_update'],
+            'mcc_decoder': opt['opt_mcc_g'],
+            'sp_encoder': opt['opt_sp_e'],
+            'mcc_encoder': opt['opt_mcc_e'],
+        }
+        vae_fetches_no_step_update = {
             'sp_decoder': opt['opt_sp_g'],
             'mcc_decoder': opt['opt_mcc_g'],
             'sp_encoder': opt['opt_sp_e'],
@@ -339,46 +298,46 @@ class CDVAEUGAN(object):
             'discriminator': opt['opt_d'],
             'classifier': opt['opt_c']
         }
+        
         info_fetches = {
-            'Dis': loss['wgan_mcc'],
-            "D_KL_sp": loss['D_KL_sp'],
-            "D_KL_mcc": loss['D_KL_mcc'],
-            "recon_sp": loss['recon_sp'],
-            "recon_mcc": loss['recon_mcc'],
-            "cross_sp2mcc": loss['cross_sp2mcc'],
-            "cross_mcc2sp": loss['cross_mcc2sp'],
-            "latent": loss['latent'],
             'step': opt['global_step'],
         }
-        valid_fetches = {
-            "recon": valid['recon_sp'],
-            "step": opt['global_step'],
-        }
+        for k in loss:
+            info_fetches[k] = loss[k]
 
         return {
-            'vae': vae_fetches,
+            'vae_step_update': vae_fetches_step_update,
+            'vae_no_step_update': vae_fetches_no_step_update,
             'cls': cls_fetches,
             'gan': gan_fetches,
             'info': info_fetches,
-            'valid': valid_fetches,
         }
 
-    def sp_encode(self, x):
-        z_mu, _ = self.sp_enc(x)
-        return z_mu
+    def encode(self, x, feat_type):
+        # sanity check
+        if not feat_type in ['sp', 'mcc']:
+            print('feature type does not match!')
+            raise NotImplementedError
 
-    def sp_decode(self, z, y):
-        return self.sp_dec(z, y)
-    
-    def mcc_encode(self, x):
-        z_mu, _ = self.mcc_enc(x)
-        return z_mu
+        # normalize input using mean/var
+        x_in_minmax = self.normalizers[feat_type]['minmax'].forward_process(x) # [n_frames, dim]
+        x_in = tf.expand_dims(tf.expand_dims(x_in_minmax, 0), 0) # [1, 1, n_frames, dim]
 
-    def mcc_decode(self, z, y):
-        return self.mcc_dec(z, y)
+        if feat_type == 'sp':
+            return self.sp_enc(x_in)
+        elif feat_type == 'mcc':
+            return self.mcc_enc(x_in)
 
-    def encode(self, x):
-        return self.mcc_encode(x)
-
-    def decode(self, z, y):
-        return self.mcc_decode(z, y)
+    def decode(self, z, y, feat_type):
+        # sanity check
+        if not feat_type in ['sp', 'mcc']:
+            print('feature type does not match!')
+            raise NotImplementedError
+        
+        if feat_type == 'sp':
+            xh = self.sp_dec(z, y)
+        elif feat_type == 'mcc':
+            xh = self.mcc_dec(z, y)
+        
+        xh = tf.squeeze(xh, 0)
+        return self.normalizers[feat_type]['minmax'].backward_process(xh)
