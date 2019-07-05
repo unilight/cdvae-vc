@@ -1,0 +1,5 @@
+tensorflow-gpu
+h5py
+scipy
+sprocket-vc
+librosa
