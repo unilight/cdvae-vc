@@ -1,8 +1,8 @@
 # CDVAE VC
 - Official TensorFlow implementation of CDVAE-VC for reproducing the results in various papers.
 - This repository uses the the Voice Conversion Challenge 2018 (VCC 2018) dataset.
-- This repository provides two models:
-  - VAE with FCN structure (refer to our TETCI journal paper; will release when accepted.)
+- This repository provides the following models to reproduce the results for our TETCI paper:
+  - VAE with FCN structure
   - CDVAE with FCN structure (please refer to our [Interspeech 2019 paper](https://arxiv.org/pdf/1905.00615.pdf).)
   - CDVAE-CLS-GAN with FCN structure (refer to our TETCI journal paper; will release when accepted.)
 
