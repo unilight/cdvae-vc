@@ -8,12 +8,12 @@
 
 ## Requirements
 
-The following requirement is not a minimum set but should cover whatever is needed.
+The following requirement is not a minimum set but should cover packages needed to run everything.
 
-- tensorflow-gpu == 1.4
+- tensorflow-gpu 1.4
 - h5py
 - scipy
-- sprocket-vc
+- [sprocket-vc](https://github.com/k2kobayashi/sprocket)
 - librosa
 
 ## Basic Usage
@@ -55,7 +55,7 @@ python preprocessing/vcc2018/calc_stats.py \
 
 ### Training
 
-Now we are ready to train the model. 
+Now we are ready to train a model.
 
 ``` 
 CUDA_VISIBLE_DEVICES={GPU-index} python train.py \
@@ -63,26 +63,25 @@ CUDA_VISIBLE_DEVICES={GPU-index} python train.py \
   --note {note-to-dsitinguish-different-runs}
 ```
 
-It is adviced to specify `CUDA_VISIBLE_DEVICES` since TensorFlow tends to occupy all available GPUs.
-A directory will be created for each training run in `logdir/{training-timestamp}-{note}`. It is suggested to use the `--note` argument to distinguish different training runs. Each training directory contains a copy of the architecture file, a training log file and the saved model weight files.
+It is adviced to specify `CUDA_VISIBLE_DEVICES` since TensorFlow tends to occupy all available GPUs. After a training run starts, a directory will be created in `logdir/{training-timestamp}-{note}`. It is suggested to use the `--note` argument to distinguish different training runs. Each training directory contains a copy of the architecture file, a training log file and the saved model weight files.
 
 ### Conversion, Synthesizing and MCD calculation
 
-After we train a model, we can now perform conversion of spectral features, synthesize waveforms from the converted feautures and calculate the mel-cepstrum distortion (MCD) of the converted features.
+After we train a model, we can perform conversion of spectral features, synthesize waveforms from the converted feautures and calculate the mel-cepstrum distortion (MCD) of the converted features using the trained model.
 
 ``` 
-CUDA_VISIBLE_DEVICES=1 python convert.py \
+CUDA_VISIBLE_DEVICES={GPU-index} python convert.py \
   --logdir logdir/{training-timestamp}-{note}/ \
   --src {src} --trg {trg} \
   --input_feat {sp or mcc} --output_feat {sp or mcc} \
   --mcd --syn
 ```
 
-Any of the two speakers in `data/vcc2018/conf/spk.list` can form a conversion pair. Note that only sp and mcc are available for the VAE and CDVAE-CLS-GAN models, respectively.
+Any of the two speakers in `data/vcc2018/conf/spk.list` can form a conversion pair. You can also use the same speaker as source and target to perform autoencoding (reconstruction). Note that only sp and mcc are available for the VAE and CDVAE-CLS-GAN models, respectively.
 
-A directory will be created for each conversion run in `logdir/{training-timestamp}-{note}/{testing-timestamp}-{src}-{trg}`. A experiment log file, the latent codes, the converted features and waveforms can be found in it.
+A directory will be created for each conversion run in `logdir/{training-timestamp}-{note}/{testing-timestamp}-{src}-{trg}`. A experiment log file, the latent code files, the converted feature files and converted waveforms can be found in it.
 
-It is suggested to use the `--syn` and `--mcd` flags so that one can perform the three procedures with one command. (which is what we usually desire) However, if you wish, you can still execute them seperately:
+It is suggested to specify the `--syn` and `--mcd` flags so that the three procedures can be performed within one command (which is what we usually desire). However, if you wish, you can still execute them seperately:
 
 ```
 python mcd_calculate.py \
@@ -93,9 +92,13 @@ python synthesize.py \
   --input_feat {sp or mcc} --output_feat {sp or mcc}
 ```
 
+### Note
+
+There are many command line arguments and architecture parameters that can be modified. Feel free to play with them and ask about the purpose and usage.
+
 ## TODO
 
-- [ ] validation
+- [ ] validation script
 
 ## Papers and Audio samples
 - ISCSLP 2018 conference paper: [[arXiv]](https://arxiv.org/pdf/1808.09634.pdf) [[Demo]](https://unilight.github.io/CDVAE-Demo/)
@@ -135,6 +138,8 @@ Please cite the following articles.
 ```
 
 ## Acknowledgements
+
+This repository is greatly inspired from the [official implmenetation](https://github.com/JeremyCCHsu/vae-npvc) of the original VAE-VC, and used lots of codes snippets from the [sprocket](https://github.com/k2kobayashi/sprocket) voice conversion software and the [PyTorchWaveNetVocoder](https://github.com/kan-bayashi/PytorchWaveNetVocoder) repository.
 
 ## Authors
 
