@@ -1,31 +1,101 @@
 # CDVAE VC
-- Official Tensorflow implementation of CDVAE-VC.
-- This repository provides two kinds of models:
+- Official TensorFlow implementation of CDVAE-VC for reproducing the results in various papers.
+- This repository uses the the Voice Conversion Challenge 2018 (VCC 2018) dataset.
+- This repository provides two models:
+  - VAE with FCN structure (refer to our TETCI journal paper; will release when accepted.)
   - CDVAE with FCN structure (please refer to our [Interspeech 2019 paper](https://arxiv.org/pdf/1905.00615.pdf).)
-  - CDVAE-CLS-GAN with FCN structure (will wait until our TETCI journal paper gets accepted.)
+  - CDVAE-CLS-GAN with FCN structure (refer to our TETCI journal paper; will release when accepted.)
 
 ## Requirements
 
+The following requirement is not a minimum set but should cover whatever is needed.
+
+- tensorflow-gpu == 1.4
+- h5py
+- scipy
+- sprocket-vc
+- librosa
+
 ## Basic Usage
+
+### Architectures & Hyperparameters
+
+The model architectures and hyperparameters of the models are stored in the JSON format. Paths to feature, configuration and statistics files are also in the architecture files. They are in the `architectures` directory and names as `architecture-{model}.json`. Feel free to modify them for your own purposes.
+
+### Downloading the dataset
+
+First we download the VCC2018 dataset. It will be saved in `data/vcc2018/wav/`.
+
+```
+cd data
+sh download.sh
+cd ..
+```
+
+### preprocessing
+
+Then, we perform feature extraction and calculate statistics including:
+
+- min/max, mean/std of spectral features
+- mean/std of f0
+- global variances of spectral features
+
+The extracted features will be stored in binary format for fast TensorFlow data loading, and the statistics will be stored in h5 format. You can decide where to store these files. We provide a default execution script as follows:
+
+```
+python preprocessing/vcc2018/feature_extract.py \
+  --waveforms data/vcc2018/wav/ \
+  --bindir data/vcc2018/bin/ \
+  --confdir data/vcc2018/conf
+python preprocessing/vcc2018/calc_stats.py \
+  --bindir data/vcc2018/bin/VAD/ \
+  --stats data/vcc2018/stats/stats.h5 \
+  --spklist data/vcc2018/conf/spk.list
+```
 
 ### Training
 
-``` 
-python main.py
-```
-### Conversion
+Now we are ready to train the model. 
 
 ``` 
-python convert.py --src [src] --trg [trg] --logdir [training logdir]
+CUDA_VISIBLE_DEVICES={GPU-index} python train.py \
+  --architecture architectures/architecture-{model}.json \
+  --note {note-to-dsitinguish-different-runs}
 ```
-### Synthesizing
+
+It is adviced to specify `CUDA_VISIBLE_DEVICES` since TensorFlow tends to occupy all available GPUs.
+A directory will be created for each training run in `logdir/{training-timestamp}-{note}`. It is suggested to use the `--note` argument to distinguish different training runs. Each training directory contains a copy of the architecture file, a training log file and the saved model weight files.
+
+### Conversion, Synthesizing and MCD calculation
+
+After we train a model, we can now perform conversion of spectral features, synthesize waveforms from the converted feautures and calculate the mel-cepstrum distortion (MCD) of the converted features.
 
 ``` 
-python synthesize.py --logdir [conversion logdir]
+CUDA_VISIBLE_DEVICES=1 python convert.py \
+  --logdir logdir/{training-timestamp}-{note}/ \
+  --src {src} --trg {trg} \
+  --input_feat {sp or mcc} --output_feat {sp or mcc} \
+  --mcd --syn
 ```
 
-## Notes
+Any of the two speakers in `data/vcc2018/conf/spk.list` can form a conversion pair. Note that only sp and mcc are available for the VAE and CDVAE-CLS-GAN models, respectively.
 
+A directory will be created for each conversion run in `logdir/{training-timestamp}-{note}/{testing-timestamp}-{src}-{trg}`. A experiment log file, the latent codes, the converted features and waveforms can be found in it.
+
+It is suggested to use the `--syn` and `--mcd` flags so that one can perform the three procedures with one command. (which is what we usually desire) However, if you wish, you can still execute them seperately:
+
+```
+python mcd_calculate.py \
+  --logdir logdir/{training-timestamp}-{note}/{testing-timestamp}-{src}-{trg} \
+  --input_feat {sp or mcc} --output_feat {sp or mcc}
+python synthesize.py \
+  --logdir logdir/{training-timestamp}-{note}/{testing-timestamp}-{src}-{trg} \
+  --input_feat {sp or mcc} --output_feat {sp or mcc}
+```
+
+## TODO
+
+- [ ] validation
 
 ## Papers and Audio samples
 - ISCSLP 2018 conference paper: [[arXiv]](https://arxiv.org/pdf/1808.09634.pdf) [[Demo]](https://unilight.github.io/CDVAE-Demo/)
