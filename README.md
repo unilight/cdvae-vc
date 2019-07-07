@@ -99,6 +99,7 @@ There are many command line arguments and architecture parameters that can be mo
 ## TODO
 
 - [ ] validation script
+- [ ] pretrained model weights
 
 ## Papers and Audio samples
 - ISCSLP 2018 conference paper: [[arXiv]](https://arxiv.org/pdf/1808.09634.pdf) [[Demo]](https://unilight.github.io/CDVAE-Demo/)
