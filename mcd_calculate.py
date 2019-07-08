@@ -22,7 +22,7 @@ import multiprocessing as mp
 
 import sys
 from preprocessing.vcc2018.feature_reader import Whole_feature_reader
-from preprocessing.normalizer import MinMaxScaler
+from util.normalizer import MinMaxScaler
 
 def read_and_synthesize(file_list, arch, MCD, input_feat, output_feat):
     

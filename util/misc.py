@@ -1,20 +1,18 @@
-# -*- coding: utf-8 -*-
 
 # Based on 2017 Tomoki Hayashi (Nagoya University)
 #  Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
 
-from __future__ import division
-from __future__ import print_function
-
-import fnmatch
+import json
 import os
 import sys
-import threading
+from datetime import datetime
 
+import fnmatch
 import h5py
 import numpy as np
 
-from numpy.matlib import repmat
+import tensorflow as tf
+import logging
 
 def read_hdf5(hdf5_name, hdf5_path):
     """FUNCTION TO READ HDF5 DATASET
@@ -118,80 +116,73 @@ def read_txt(file_list):
         filenames = f.readlines()
     return [filename.replace("\n", "") for filename in filenames]
 
+def save(saver, sess, logdir, step):
+    ''' Save a model to logdir/model.ckpt-[step] '''
+    model_name = 'model.ckpt'
+    checkpoint_path = os.path.join(logdir, model_name)
+    print('Storing checkpoint to {} ...'.format(logdir), end="")
+    sys.stdout.flush()
 
-class BackgroundGenerator(threading.Thread):
-    """BACKGROUND GENERATOR
+    if not os.path.exists(logdir):
+        os.makedirs(logdir)
 
-    reference:
-        https://stackoverflow.com/questions/7323664/python-generator-pre-fetch
+    saver.save(sess, checkpoint_path, global_step=step)
+    print(' Done.')
 
-    Args:
-        generator (object): generator instance
-        max_prefetch (int): max number of prefetch
-    """
 
-    def __init__(self, generator, max_prefetch=1):
-        threading.Thread.__init__(self)
-        if sys.version_info.major == 2:
-            from Queue import Queue
+def load(saver, sess, logdir, ckpt=None):
+    '''
+    Try to load model form a dir (search for the newest checkpoint)
+    '''
+    if ckpt:
+        ckpt = os.path.join(logdir, ckpt)
+        global_step = int(ckpt.split('/')[-1].split('-')[-1])
+        logging.info('  Global step: {}'.format(global_step))
+        saver.restore(sess, ckpt)
+        return global_step
+    else:
+        ckpt = tf.train.latest_checkpoint(logdir)
+        if ckpt:
+            logging.info('  Checkpoint found: {}'.format(ckpt))
+            global_step = int(ckpt.split('/')[-1].split('-')[-1])
+            logging.info('  Global step: {}'.format(global_step))
+            saver.restore(sess, ckpt)
+            return global_step
         else:
-            from queue import Queue
-        self.queue = Queue(max_prefetch)
-        self.generator = generator
-        self.daemon = True
-        self.start()
+            print('No checkpoint found')
+            return None
 
-    def run(self):
-        for item in self.generator:
-            self.queue.put(item)
-        self.queue.put(None)
+def get_default_logdir_train(note, logdir_root='logdir'):
+    STARTED_DATESTRING = datetime.now().strftime('%0m%0d-%0H%0M-%0S-%Y')
+    logdir = os.path.join(logdir_root, '{}-{}'.format(STARTED_DATESTRING, note))
+    print('Using default logdir: {}'.format(logdir))        
+    return logdir
 
-    def next(self):
-        next_item = self.queue.get()
-        if next_item is None:
-            raise StopIteration
-        return next_item
+def get_default_logdir_output(args):
+    STARTED_DATESTRING = datetime.now().strftime('%0m%0d-%0H%0M-%0S-%Y')
+    logdir = os.path.join(args.logdir, STARTED_DATESTRING+'-{}-{}'.format(args.src, args.trg))
+    print('Logdir: {}'.format(logdir))        
+    return logdir
 
-    def __next__(self):
-        return self.next()
+class ValueWindow():
+    def __init__(self, window_size=100):
+        self._window_size = window_size
+        self._values = []
 
-    def __iter__(self):
-        return self
+    def append(self, x):
+        self._values = self._values[-(self._window_size - 1):] + [x]
 
+    @property
+    def sum(self):
+        return sum(self._values)
 
-class background(object):
-    """BACKGROUND GENERATOR DECORATOR"""
+    @property
+    def count(self):
+        return len(self._values)
 
-    def __init__(self, max_prefetch=1):
-        self.max_prefetch = max_prefetch
+    @property
+    def average(self):
+        return self.sum / max(1, self.count)
 
-    def __call__(self, gen):
-        def bg_generator(*args, **kwargs):
-            return BackgroundGenerator(gen(*args, **kwargs))
-        return bg_generator
-
-
-def extend_time(feats, upsampling_factor):
-    """FUNCTION TO EXTEND TIME RESOLUTION
-
-    Args:
-        feats (ndarray): feature vector with the shape (T x D)
-        upsampling_factor (int): upsampling_factor
-
-    Return:
-        (ndarray): extend feats with the shape (upsampling_factor*T x D)
-    """
-    # get number
-    n_frames = feats.shape[0]
-    n_dims = feats.shape[1]
-
-    # extend time
-    feats_extended = np.zeros((n_frames * upsampling_factor, n_dims))
-    for j in range(n_frames):
-        start_idx = j * upsampling_factor
-        end_idx = (j + 1) * upsampling_factor
-        feats_extended[start_idx: end_idx] = repmat(feats[j, :], upsampling_factor, 1)
-
-    return feats_extended
-
-
+    def reset(self):
+        self._values = []

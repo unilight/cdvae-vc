@@ -19,8 +19,8 @@ import logging
 
 import sys
 from preprocessing.vcc2018.feature_reader import  Segment_feature_reader
-from preprocessing.normalizer import MinMaxScaler
-from preprocessing.utils import read_hdf5
+from util.normalizer import MinMaxScaler
+from util.misc import read_hdf5
 
 def main():
     

@@ -17,9 +17,8 @@ import logging
 
 import sys
 from preprocessing.vcc2018.feature_reader import Whole_feature_reader
-from preprocessing.normalizer import MinMaxScaler, StandardScaler
-from preprocessing.utils import read_hdf5, read_txt
-from util.wrapper import load, get_default_logdir_output
+from util.normalizer import MinMaxScaler, StandardScaler
+from util.misc import read_hdf5, read_txt, load, get_default_logdir_output
 
 def main():
     

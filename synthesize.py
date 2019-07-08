@@ -23,11 +23,11 @@ import logging
 import multiprocessing as mp
 
 import sys
-from preprocessing.synthesizer import world_synthesis
-from preprocessing.utils import read_hdf5
 from preprocessing.vcc2018.feature_reader import Whole_feature_reader
-from preprocessing.postfilter import fast_MLGV
-from preprocessing.f0transformation import log_linear_transformation
+from util.synthesizer import world_synthesis
+from util.misc import read_hdf5
+from util.postfilter import fast_MLGV
+from util.f0transformation import log_linear_transformation
 
 def read_and_synthesize(file_list, arch, stats, input_feat, output_feat):
     

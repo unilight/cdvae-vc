@@ -1,10 +1,10 @@
+import numpy as np
 import tensorflow as tf
 from tensorflow.contrib import slim
+from util.misc import ValueWindow
 from util.layers import (GaussianKLD, GaussianLogDensity, GaussianSampleLayer,
                          Layernorm, conv2d_nchw_layernorm, lrelu,
                          kl_loss, log_loss, gradient_penalty_loss)
-import numpy as np
-from util.wrapper import ValueWindow
 
 class CDVAECLSGAN(object):
     def __init__(self, arch, normalizers=None):

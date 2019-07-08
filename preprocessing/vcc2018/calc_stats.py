@@ -14,9 +14,9 @@ import os
 from sklearn.preprocessing import StandardScaler
 
 import sys
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from utils import (find_files, read_txt, write_hdf5)
-from vcc2018.feature_reader import Whole_feature_reader
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+from util.misc import (find_files, read_txt, write_hdf5)
+from preprocess.vcc2018.feature_reader import Whole_feature_reader
 
 def calc_stats(file_list, feat_param, spk_list, args):
     

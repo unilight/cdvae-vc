@@ -2,8 +2,7 @@ import tensorflow as tf
 import numpy as np
 import logging, os
 
-from util.wrapper import load 
-from util.wrapper import ValueWindow
+from util.misc import load, ValueWindow
 
 class Trainer(object):
     def __init__(self, model, train_data, arch, args, dirs, ckpt):

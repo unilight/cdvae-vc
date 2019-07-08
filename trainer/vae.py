@@ -4,7 +4,7 @@ import os
 import numpy as np
 import tensorflow as tf
 from trainer.base import Trainer
-from util.wrapper import ValueWindow
+from util.misc import ValueWindow
 import time
 
 class VAETrainer(Trainer):

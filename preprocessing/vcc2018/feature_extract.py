@@ -27,8 +27,8 @@ from scipy.signal import firwin
 from scipy.signal import lfilter
 from sprocket.speech.feature_extractor import FeatureExtractor
 
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from utils import (find_files, read_txt, read_hdf5, write_hdf5)
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+from util.misc import (find_files, read_txt, read_hdf5, write_hdf5)
 
 def energy_norm(feat):
     en = np.sum(feat + 1e-8, axis=1, keepdims=True)
