@@ -1,4 +1,4 @@
-tensorflow-gpu==1.4
+tensorflow-gpu==1.15.2
 h5py
 scipy
 sprocket-vc
